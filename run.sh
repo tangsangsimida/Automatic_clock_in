@@ -47,17 +47,9 @@ check_venv() {
 
 # 检查配置文件
 check_config() {
-    if [[ ! -f ".env" ]]; then
-        log_warning "配置文件不存在，正在创建模板..."
-        cat > ".env" << 'EOF'
-# GitHub配置
-# 请填写您的GitHub信息
-GITHUB_TOKEN=your_github_token_here
-GITHUB_USERNAME=your_username_here
-GITHUB_EMAIL=your_email@example.com
-GITHUB_REPO=auto-commit-repo
-EOF
-        log_error "请编辑 .env 文件，填写您的GitHub信息后重新运行"
+    if [[ ! -f "data/accounts_config.json" ]]; then
+        log_warning "多账号配置文件不存在"
+        log_info "请使用 --create-config 创建配置文件模板"
         exit 1
     fi
 }
@@ -306,7 +298,6 @@ main() {
         -r|--run-once)
             check_venv
             check_config
-            source .env
             source venv/bin/activate
             if [[ -n "$2" ]]; then
                 # 执行指定账号
@@ -320,7 +311,6 @@ main() {
         -d|--daemon)
             check_venv
             check_config
-            source .env
             source venv/bin/activate
             python scheduler.py --daemon
             exit $?
@@ -328,7 +318,6 @@ main() {
         -s|--status)
             check_venv
             check_config
-            source .env
             source venv/bin/activate
             python scheduler.py --status
             exit $?
@@ -419,7 +408,6 @@ else:
         --interactive|"")
             check_venv
             check_config
-            source .env
             source venv/bin/activate
             python scheduler.py
             exit $?

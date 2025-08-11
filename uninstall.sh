@@ -207,7 +207,7 @@ remove_config() {
         return
     fi
     
-    local config_files=(".env" "config.local.py")
+    local config_files=("data/accounts_config.json" "config.local.py")
     
     for config_file in "${config_files[@]}"; do
         local file_path="$SCRIPT_DIR/$config_file"

@@ -41,21 +41,9 @@ chmod +x install.sh run.sh
 ./install.sh
 ```
 
-### 3. 配置GitHub信息
+### 3. 配置GitHub账号信息
 
-#### 单账号模式 (简单)
-编辑 `.env` 文件，填写您的GitHub信息：
-
-```bash
-# GitHub配置
-GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
-GITHUB_USERNAME=your_username
-GITHUB_EMAIL=your_email@example.com
-GITHUB_REPO=auto-commit-repo
-```
-
-#### 多账号模式 (推荐)
-创建多账号配置：
+创建账号配置：
 ```bash
 # 创建配置模板
 ./run.sh --create-config
@@ -230,16 +218,7 @@ sudo systemctl disable github-auto-commit
 
 ## ⚙️ 配置说明
 
-### 单账号配置 (.env)
-
-| 变量名 | 说明 | 必需 | 默认值 |
-|--------|------|------|---------|
-| `GITHUB_TOKEN` | GitHub Personal Access Token | ✅ | - |
-| `GITHUB_USERNAME` | GitHub用户名 | ✅ | - |
-| `GITHUB_EMAIL` | GitHub邮箱 | ✅ | - |
-| `GITHUB_REPO` | 仓库名称 | ❌ | auto-commit-repo |
-
-### 多账号配置 (data/accounts_config.json)
+### 账号配置 (data/accounts_config.json)
 
 ```json
 [
@@ -289,10 +268,7 @@ sudo systemctl disable github-auto-commit
 ### 时间配置 (config.py)
 
 ```python
-# 每天提交的时间点 (单账号模式)
-COMMIT_TIMES = ['09:00', '18:00']
-
-# 提交频率选项 (多账号模式)
+# 提交频率选项
 COMMIT_FREQUENCY_OPTIONS = {
     'daily': ['09:00'],
     'frequent': ['09:00', '14:00', '20:00'],

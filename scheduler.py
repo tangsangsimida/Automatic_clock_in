@@ -16,7 +16,7 @@ import sys
 
 from auto_commit import GitHubAutoCommit, run_multi_account_commits
 from config import (
-    COMMIT_TIMES, LOG_FILE, validate_config,
+    LOG_FILE, validate_config,
     load_accounts_config, list_enabled_accounts
 )
 

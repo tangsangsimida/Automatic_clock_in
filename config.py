@@ -11,16 +11,10 @@ import json
 from datetime import datetime
 from typing import List, Dict, Any
 
-# 单账号配置（向后兼容）
-GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')  # GitHub Personal Access Token
-GITHUB_USERNAME = os.getenv('GITHUB_USERNAME', '')  # GitHub用户名
-GITHUB_REPO = os.getenv('GITHUB_REPO', 'auto-commit-repo')  # 仓库名
-GITHUB_EMAIL = os.getenv('GITHUB_EMAIL', '')  # GitHub邮箱
-
 # 多账号配置
 # 可以通过环境变量GITHUB_ACCOUNTS_CONFIG指定JSON配置文件路径
 # 或者通过GITHUB_ACCOUNTS_JSON直接提供JSON字符串
-GITHUB_ACCOUNTS_CONFIG = os.getenv('GITHUB_ACCOUNTS_CONFIG', '')
+GITHUB_ACCOUNTS_CONFIG = os.getenv('GITHUB_ACCOUNTS_CONFIG', os.path.join(os.path.dirname(__file__), 'data', 'accounts_config.json'))
 GITHUB_ACCOUNTS_JSON = os.getenv('GITHUB_ACCOUNTS_JSON', '')
 
 # 默认多账号配置示例
@@ -71,7 +65,8 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 # 时间配置
 TIMEZONE = 'Asia/Shanghai'
-COMMIT_TIMES = ['09:00', '18:00']  # 每天提交的时间点
+
+# 提交配置（已移至多账号配置中）
 
 # 分支配置
 MAIN_BRANCH = 'main'
@@ -102,19 +97,9 @@ def load_accounts_config() -> List[Dict[str, Any]]:
         except (json.JSONDecodeError, IOError) as e:
             raise ValueError(f"读取账号配置文件失败: {e}")
     
-    # 如果没有多账号配置，使用单账号配置
-    elif GITHUB_TOKEN and GITHUB_USERNAME and GITHUB_EMAIL:
-        accounts = [{
-            "name": "default",
-            "token": GITHUB_TOKEN,
-            "username": GITHUB_USERNAME,
-            "email": GITHUB_EMAIL,
-            "repo": GITHUB_REPO,
-            "enabled": True,
-            "commit_times": COMMIT_TIMES,
-            "commit_frequency": "daily",
-            "custom_schedule": []
-        }]
+    # 如果没有找到配置，提示用户创建
+    else:
+        raise ValueError(f"未找到账号配置文件: {GITHUB_ACCOUNTS_CONFIG}\n请运行 './run.sh --create-config' 创建配置文件")
     
     # 验证和补充账号配置
     validated_accounts = []
@@ -239,10 +224,12 @@ if __name__ == '__main__':
     try:
         validate_config()
         print("✅ 配置验证通过")
+        accounts = load_accounts_config()
+        print(f"📋 已加载 {len(accounts)} 个账号配置")
+        for account in accounts:
+            print(f"  - {account['name']}: {account['username']} ({account['commit_frequency']})")
     except ValueError as e:
         print(f"❌ 配置验证失败: {e}")
-        print("\n请设置以下环境变量:")
-        print("export GITHUB_TOKEN='your_github_token'")
-        print("export GITHUB_USERNAME='your_username'")
-        print("export GITHUB_EMAIL='your_email@example.com'")
-        print("export GITHUB_REPO='your_repo_name'  # 可选，默认为auto-commit-repo")
+        print("\n请运行以下命令创建配置文件:")
+        print("./run.sh --create-config")
+        print("\n或者手动创建 data/accounts_config.json 文件")

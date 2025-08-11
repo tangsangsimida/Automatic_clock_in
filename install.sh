@@ -98,17 +98,27 @@ setup_config() {
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     ENV_FILE="$SCRIPT_DIR/.env"
     
-    if [[ ! -f "$ENV_FILE" ]]; then
-        cat > "$ENV_FILE" << 'EOF'
-# GitHub配置
-# 请填写您的GitHub信息
-GITHUB_TOKEN=your_github_token_here
-GITHUB_USERNAME=your_username_here
-GITHUB_EMAIL=your_email@example.com
-GITHUB_REPO=auto-commit-repo
+    # 创建data目录
+    mkdir -p "$SCRIPT_DIR/data"
+    
+    CONFIG_FILE="$SCRIPT_DIR/data/accounts_config.json"
+    
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        cat > "$CONFIG_FILE" << 'EOF'
+[
+  {
+    "name": "account1",
+    "username": "your_username_here",
+    "email": "your_email@example.com",
+    "token": "your_github_token_here",
+    "repo": "auto-commit-repo",
+    "commit_frequency": "daily",
+    "enabled": true
+  }
+]
 EOF
         
-        log_warning "请编辑 $ENV_FILE 文件，填写您的GitHub信息"
+        log_warning "请编辑 $CONFIG_FILE 文件，填写您的GitHub信息"
         log_info "GitHub Token获取方法:"
         log_info "1. 访问 https://github.com/settings/tokens"
         log_info "2. 点击 'Generate new token (classic)'"
@@ -117,7 +127,7 @@ EOF
         
         read -p "按回车键继续..."
     else
-        log_info "配置文件已存在: $ENV_FILE"
+        log_info "配置文件已存在: $CONFIG_FILE"
     fi
 }
 
@@ -140,7 +150,6 @@ Wants=network.target
 Type=simple
 User=$USER
 WorkingDirectory=$SCRIPT_DIR
-EnvironmentFile=$SCRIPT_DIR/.env
 ExecStart=$SCRIPT_DIR/venv/bin/python $SCRIPT_DIR/scheduler.py --daemon
 Restart=always
 RestartSec=10
@@ -171,7 +180,6 @@ setup_crontab() {
     cat > "$CRON_SCRIPT" << EOF
 #!/bin/bash
 cd "$SCRIPT_DIR"
-source .env
 source venv/bin/activate
 python scheduler.py --run-once
 EOF
@@ -195,7 +203,6 @@ create_management_scripts() {
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-source .env
 source venv/bin/activate
 python scheduler.py --daemon
 EOF
@@ -221,7 +228,6 @@ EOF
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-source .env
 source venv/bin/activate
 python scheduler.py --run-once
 EOF
@@ -239,14 +245,13 @@ test_configuration() {
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     
     cd "$SCRIPT_DIR"
-    source .env
     source venv/bin/activate
     
     # 测试配置
     if python -c "from config import validate_config; validate_config()"; then
         log_success "配置验证通过"
     else
-        log_error "配置验证失败，请检查.env文件"
+        log_error "配置验证失败，请检查data/accounts_config.json文件"
         return 1
     fi
 }
@@ -299,7 +304,7 @@ main() {
     log_success "安装完成！"
     echo
     log_info "下一步操作:"
-    log_info "1. 编辑 .env 文件，填写您的GitHub信息"
+    log_info "1. 编辑 data/accounts_config.json 文件，填写您的GitHub信息"
     log_info "2. 运行测试: ./run_once.sh"
     log_info "3. 启动服务: sudo systemctl start github-auto-commit"
     log_info "4. 查看状态: ./status.sh"

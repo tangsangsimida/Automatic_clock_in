@@ -136,16 +136,6 @@ class SystemTester:
     def test_config_file(self) -> bool:
         """测试配置文件"""
         try:
-            # 检查.env文件是否存在
-            env_file = os.path.join(self.script_dir, '.env')
-            if not os.path.exists(env_file):
-                self.log_test_result(
-                    "配置文件检查", 
-                    False, 
-                    ".env文件不存在，请复制.env.example并填写配置"
-                )
-                return False
-            
             # 尝试导入配置
             sys.path.insert(0, self.script_dir)
             from config import validate_config, load_accounts_config
@@ -161,6 +151,11 @@ class SystemTester:
                 True, 
                 f"配置文件验证通过，成功加载 {len(accounts)} 个账号配置"
             )
+            
+            # 显示账号详情
+            for account in accounts:
+                print(f"  - {account['name']}: {account['username']} ({account['commit_frequency']})")
+            
             return True
             
         except Exception as e:
