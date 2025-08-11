@@ -33,8 +33,19 @@ log_error() {
 # 检查是否为root用户
 check_root() {
     if [[ $EUID -eq 0 ]]; then
-        log_error "请不要使用root用户运行此脚本"
-        exit 1
+        log_warning "检测到您正在使用root用户运行此脚本"
+        log_warning "使用root用户可能会导致以下问题:"
+        log_warning "1. 虚拟环境和配置文件的权限问题"
+        log_warning "2. 普通用户无法正常使用和修改配置"
+        log_warning "3. 安全风险增加"
+        echo
+        read -p "是否仍要继续安装? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "安装已取消。建议使用普通用户重新运行安装脚本。"
+            exit 1
+        fi
+        log_warning "继续使用root用户安装..."
     fi
 }
 
