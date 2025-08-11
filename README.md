@@ -173,6 +173,61 @@ sudo systemctl enable github-auto-commit
 sudo systemctl disable github-auto-commit
 ```
 
+## 🗑️ 卸载系统
+
+如果您需要完全删除GitHub自动打卡系统，可以使用提供的卸载脚本：
+
+### 基本卸载
+
+```bash
+# 交互式卸载（推荐）
+./uninstall.sh
+
+# 强制卸载（无需确认）
+./uninstall.sh --force
+```
+
+### 卸载选项
+
+```bash
+./uninstall.sh [选项]
+
+选项:
+  -h, --help              显示帮助信息
+  -f, --force             强制卸载，不询问确认
+  --keep-config           保留配置文件
+  --keep-logs             保留日志文件
+  --dry-run               仅显示将要删除的内容，不实际删除
+
+使用示例:
+  ./uninstall.sh                    # 交互式卸载
+  ./uninstall.sh --force            # 强制卸载所有内容
+  ./uninstall.sh --keep-config      # 卸载但保留配置文件
+  ./uninstall.sh --keep-logs        # 卸载但保留日志文件
+  ./uninstall.sh --dry-run          # 预览将要删除的内容
+```
+
+### 卸载内容
+
+卸载脚本将删除以下内容：
+
+- ✅ **systemd服务**: 停止并删除 `github-auto-commit` 服务
+- ✅ **crontab任务**: 删除相关的定时任务
+- ✅ **运行进程**: 停止所有相关的运行进程
+- ✅ **虚拟环境**: 删除 `venv/` 目录
+- ✅ **数据文件**: 删除 `data/` 目录（包括账号配置）
+- ✅ **日志文件**: 删除 `logs/` 目录（可选保留）
+- ✅ **配置文件**: 删除 `.env` 和 `config.local.py`（可选保留）
+- ✅ **临时文件**: 清理 `*.pyc`、`__pycache__`、`*.pid` 等
+
+### 注意事项
+
+⚠️ **重要提醒**：
+- 卸载操作不可逆，请确保已备份重要数据
+- 项目目录本身不会被删除，需要手动删除
+- 使用 `--dry-run` 选项可以预览将要删除的内容
+- 如果保留了配置文件，重新安装时可以直接使用
+
 ## ⚙️ 配置说明
 
 ### 单账号配置 (.env)
@@ -269,8 +324,13 @@ Automatic_clock_in/
 ├── scheduler.py            # 定时任务调度器
 ├── install.sh              # 安装脚本
 ├── run.sh                  # 启动脚本
+├── uninstall.sh            # 卸载脚本
+├── test.py                 # 系统测试脚本
 ├── requirements.txt        # Python依赖
 ├── .env                    # 环境变量配置
+├── .env.example            # 环境变量模板
+├── accounts_config.example.json  # 多账号配置模板
+├── .gitignore              # Git忽略文件
 ├── data/                   # 数据目录
 │   ├── accounts_config.json         # 多账号配置
 │   ├── commit_data_default_*.json   # 单账号数据
