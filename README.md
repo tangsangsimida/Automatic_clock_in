@@ -1,0 +1,2 @@
+# Automatic_clock_in
+定时提交GitHub_PR保持提交图全绿
