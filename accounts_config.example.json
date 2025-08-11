@@ -1,0 +1,57 @@
+[
+  {
+    "name": "account1",
+    "token": "ghp_your_token_here_1",
+    "username": "your_username_1",
+    "email": "your_email_1@example.com",
+    "repo": "auto-commit-repo-1",
+    "enabled": true,
+    "commit_frequency": "daily",
+    "custom_schedule": [],
+    "description": "主账号 - 每天提交一次"
+  },
+  {
+    "name": "account2",
+    "token": "ghp_your_token_here_2",
+    "username": "your_username_2",
+    "email": "your_email_2@example.com",
+    "repo": "auto-commit-repo-2",
+    "enabled": true,
+    "commit_frequency": "frequent",
+    "custom_schedule": [],
+    "description": "副账号 - 频繁提交保持活跃"
+  },
+  {
+    "name": "account3",
+    "token": "ghp_your_token_here_3",
+    "username": "your_username_3",
+    "email": "your_email_3@example.com",
+    "repo": "auto-commit-repo-3",
+    "enabled": false,
+    "commit_frequency": "custom",
+    "custom_schedule": ["10:30", "14:15", "20:00"],
+    "description": "测试账号 - 自定义时间提交 (已禁用)"
+  },
+  {
+    "name": "work_account",
+    "token": "ghp_your_work_token_here",
+    "username": "your_work_username",
+    "email": "your_work_email@company.com",
+    "repo": "work-activity-tracker",
+    "enabled": true,
+    "commit_frequency": "hourly",
+    "custom_schedule": [],
+    "description": "工作账号 - 工作时间每小时提交"
+  },
+  {
+    "name": "minimal_account",
+    "token": "ghp_your_minimal_token_here",
+    "username": "your_minimal_username",
+    "email": "your_minimal_email@example.com",
+    "repo": "minimal-commits",
+    "enabled": true,
+    "commit_frequency": "minimal",
+    "custom_schedule": [],
+    "description": "最少提交账号 - 每天中午提交一次"
+  }
+]

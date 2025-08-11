@@ -1,0 +1,302 @@
+# GitHub自动提交系统 - Git忽略文件
+
+# ================================
+# 敏感信息和配置文件
+# ================================
+
+# 环境变量配置文件 (包含敏感信息)
+.env
+.env.local
+.env.production
+.env.staging
+.env.development
+
+# 备份的配置文件
+*.env.backup
+*.env.bak
+
+# ================================
+# Python 相关
+# ================================
+
+# 字节码文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C扩展
+*.so
+
+# 分发/打包
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# 单元测试/覆盖率报告
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath
+*.sage.py
+
+# 虚拟环境
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder
+.spyderproject
+.spyproject
+
+# Rope
+.ropeproject
+
+# mkdocs
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# pytype
+.pytype/
+
+# Cython
+cython_debug/
+
+# ================================
+# 日志和数据文件
+# ================================
+
+# 日志文件
+logs/
+*.log
+*.log.*
+*.out
+*.err
+
+# 数据文件
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+*.temp
+
+# 缓存文件
+cache/
+.cache/
+
+# ================================
+# 系统和编辑器文件
+# ================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Vim
+*.swp
+*.swo
+*~
+.viminfo
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Atom
+.atom/
+
+# JetBrains IDEs
+.idea/
+*.iws
+*.iml
+*.ipr
+
+# ================================
+# 项目特定文件
+# ================================
+
+# 备份文件
+*.backup
+*.bak
+*.old
+
+# 压缩文件
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# 测试文件
+test_output/
+test_results/
+
+# 文档生成
+docs/_build/
+docs/build/
+
+# 部署相关
+deploy/
+.deploy/
+
+# 本地开发
+local/
+.local/
+
+# 密钥文件
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# ================================
+# 运行时文件
+# ================================
+
+# PID文件
+*.pid
+
+# 锁文件
+*.lock
+
+# 套接字文件
+*.sock
+
+# 状态文件
+*.state
+
+# ================================
+# 注释说明
+# ================================
+
+# 此文件确保以下内容不会被Git跟踪:
+# 1. 包含敏感信息的配置文件 (.env)
+# 2. 自动生成的文件 (日志、缓存等)
+# 3. 系统特定文件 (操作系统、编辑器等)
+# 4. 临时文件和备份文件
+# 5. 虚拟环境和依赖文件
+
+# 如需添加例外，使用 ! 前缀:
+# !important_file.log
