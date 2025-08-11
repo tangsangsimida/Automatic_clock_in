@@ -47,7 +47,7 @@ check_system() {
     
     . /etc/os-release
     if [[ "$ID" != "ubuntu" ]]; then
-        log_warning "此脚本专为Ubuntu设计，但可能在其他发行版上运行。"当前系统: $PRETTY_NAME"
+        log_warning "此脚本专为Ubuntu设计，但可能在其他发行版上运行。当前系统: $PRETTY_NAME"
         read -p "是否继续安装? (y/N): " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then

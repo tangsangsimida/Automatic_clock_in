@@ -49,7 +49,7 @@ chmod +x install.sh run.sh
 ./run.sh --create-config
 
 # 编辑配置文件
-nano data/accounts_config.json
+nano accounts_config.json
 ```
 
 #### 获取GitHub Token
