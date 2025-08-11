@@ -466,7 +466,7 @@ class GitHubAutoCommit:
                 return True, "初始提交完成"
             else:
                 # 非空仓库：创建分支和PR
-                branch_name = f"{PR_BRANCH_PREFIX}{now.strftime('%Y%m%d-%H%M%S')}"
+                branch_name = f"{PR_BRANCH_PREFIX}{self.account_name}-{now.strftime('%Y%m%d-%H%M%S')}"
                 if not self.create_branch(branch_name, commit_sha):
                     return False, "创建分支失败"
                 
