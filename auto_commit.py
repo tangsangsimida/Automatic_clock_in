@@ -19,7 +19,6 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import (
-    GITHUB_TOKEN, GITHUB_USERNAME, GITHUB_REPO, GITHUB_EMAIL,
     COMMIT_MESSAGE_TEMPLATE, PR_TITLE_TEMPLATE, PR_BODY_TEMPLATE,
     DATA_DIR, LOG_FILE, MAIN_BRANCH, PR_BRANCH_PREFIX,
     GITHUB_API_BASE, REQUEST_TIMEOUT, MAX_RETRIES,
@@ -58,20 +57,15 @@ logger = setup_logging()
 class GitHubAutoCommit:
     """GitHub自动提交类"""
     
-    def __init__(self, account_config: Dict[str, str] = None):
-        if account_config:
-            self.token = account_config['token']
-            self.username = account_config['username']
-            self.email = account_config['email']
-            self.repo_name = account_config['repo']
-            self.account_name = account_config['name']
-        else:
-            # 兼容单账号模式
-            self.token = GITHUB_TOKEN
-            self.username = GITHUB_USERNAME
-            self.email = GITHUB_EMAIL
-            self.repo_name = GITHUB_REPO
-            self.account_name = 'default'
+    def __init__(self, account_config: Dict[str, str]):
+        if not account_config:
+            raise ValueError("account_config is required")
+            
+        self.token = account_config['token']
+        self.username = account_config['username']
+        self.email = account_config['email']
+        self.repo_name = account_config['repo']
+        self.account_name = account_config['name']
             
         self.session = requests.Session()
         self.session.headers.update({
@@ -80,6 +74,8 @@ class GitHubAutoCommit:
             'User-Agent': f'{self.username}-auto-commit'
         })
         self.repo_url = f'{GITHUB_API_BASE}/repos/{self.username}/{self.repo_name}'
+        logger.info(f"仓库URL: {self.repo_url}")
+        logger.info(f"用户名: {self.username}, 仓库名: {self.repo_name}")
     
     def _make_request(self, method: str, url: str, **kwargs) -> requests.Response:
         """发送HTTP请求，带重试机制"""
@@ -101,7 +97,15 @@ class GitHubAutoCommit:
         """检查仓库是否存在"""
         try:
             response = self._make_request('GET', self.repo_url)
-            return response.status_code == 200
+            if response.status_code == 200:
+                logger.info(f"仓库 {self.repo_name} 已存在")
+                return True
+            elif response.status_code == 404:
+                logger.info(f"仓库 {self.repo_name} 不存在")
+                return False
+            else:
+                logger.warning(f"检查仓库状态异常: {response.status_code} - {response.text}")
+                return False
         except Exception as e:
             logger.error(f"检查仓库失败: {e}")
             return False
@@ -110,20 +114,57 @@ class GitHubAutoCommit:
         """创建仓库"""
         try:
             data = {
-                'name': GITHUB_REPO,
+                'name': self.repo_name,
                 'description': '自动提交仓库 - 保持GitHub贡献图活跃',
                 'private': False,
                 'auto_init': True
             }
+            logger.info(f"正在创建仓库，请求数据: {data}")
             response = self._make_request(
                 'POST', f'{GITHUB_API_BASE}/user/repos', json=data
             )
             
+            logger.info(f"创建仓库响应状态码: {response.status_code}")
+            logger.info(f"创建仓库响应内容: {response.text}")
+            
             if response.status_code == 201:
-                logger.info(f"✅ 仓库 {GITHUB_REPO} 创建成功")
+                logger.info(f"✅ 仓库 {self.repo_name} 创建成功")
+                # 等待一段时间让仓库完全创建
+                time.sleep(2)
                 return True
+            elif response.status_code == 422:
+                # 仓库已存在，检查是否确实存在
+                response_data = response.json()
+                error_message = response_data.get('message', '')
+                errors = response_data.get('errors', [])
+                
+                logger.info(f"收到422错误，错误信息: {error_message}")
+                logger.info(f"错误详情: {errors}")
+                
+                # 检查是否是仓库名已存在的错误
+                name_exists = False
+                if 'name already exists' in error_message:
+                    name_exists = True
+                else:
+                    for error in errors:
+                        if error.get('field') == 'name' and 'already exists' in error.get('message', ''):
+                            name_exists = True
+                            break
+                
+                if name_exists:
+                    logger.info(f"仓库 {self.repo_name} 已存在，跳过创建")
+                    # 验证仓库确实存在
+                    if self.check_repo_exists():
+                        logger.info(f"验证确认仓库 {self.repo_name} 存在")
+                        return True
+                    else:
+                        logger.error(f"仓库 {self.repo_name} 声称已存在但验证失败")
+                        return False
+                else:
+                    logger.error(f"❌ 创建仓库失败: {response.text}")
+                    return False
             else:
-                logger.error(f"❌ 创建仓库失败: {response.text}")
+                logger.error(f"❌ 创建仓库失败，状态码: {response.status_code}, 响应: {response.text}")
                 return False
         except Exception as e:
             logger.error(f"创建仓库异常: {e}")
@@ -132,11 +173,44 @@ class GitHubAutoCommit:
     def get_latest_commit_sha(self, branch: str = MAIN_BRANCH) -> Optional[str]:
         """获取最新提交的SHA"""
         try:
+            # 先尝试指定的分支
             url = f'{self.repo_url}/git/refs/heads/{branch}'
             response = self._make_request('GET', url)
             
             if response.status_code == 200:
+                logger.info(f"成功获取{branch}分支的最新提交")
                 return response.json()['object']['sha']
+            elif response.status_code == 404:
+                logger.info(f"{branch}分支不存在，尝试其他分支")
+            else:
+                logger.warning(f"获取{branch}分支失败: {response.status_code} - {response.text}")
+            
+            # 如果指定分支不存在，尝试其他常见的默认分支
+            if branch == 'main':
+                # 尝试master分支
+                url = f'{self.repo_url}/git/refs/heads/master'
+                response = self._make_request('GET', url)
+                if response.status_code == 200:
+                    logger.info("使用master分支作为默认分支")
+                    return response.json()['object']['sha']
+                elif response.status_code == 404:
+                    logger.info("master分支也不存在")
+                else:
+                    logger.warning(f"获取master分支失败: {response.status_code} - {response.text}")
+            elif branch == 'master':
+                # 尝试main分支
+                url = f'{self.repo_url}/git/refs/heads/main'
+                response = self._make_request('GET', url)
+                if response.status_code == 200:
+                    logger.info("使用main分支作为默认分支")
+                    return response.json()['object']['sha']
+                elif response.status_code == 404:
+                    logger.info("main分支也不存在")
+                else:
+                    logger.warning(f"获取main分支失败: {response.status_code} - {response.text}")
+            
+            # 如果都没有找到，可能是空仓库
+            logger.info("仓库可能是空的，没有任何提交")
             return None
         except Exception as e:
             logger.error(f"获取提交SHA失败: {e}")
@@ -154,8 +228,11 @@ class GitHubAutoCommit:
             )
             
             if response.status_code == 201:
+                logger.info("成功创建blob对象")
                 return response.json()['sha']
-            return None
+            else:
+                logger.error(f"创建blob失败: {response.status_code} - {response.text}")
+                return None
         except Exception as e:
             logger.error(f"创建blob失败: {e}")
             return None
@@ -183,21 +260,21 @@ class GitHubAutoCommit:
             logger.error(f"创建tree失败: {e}")
             return None
     
-    def create_commit(self, tree_sha: str, parent_sha: str, message: str) -> Optional[str]:
+    def create_commit(self, tree_sha: str, parent_sha: Optional[str], message: str) -> Optional[str]:
         """创建提交"""
         try:
             data = {
                 'message': message,
                 'tree': tree_sha,
-                'parents': [parent_sha],
+                'parents': [] if parent_sha is None else [parent_sha],
                 'author': {
-                    'name': GITHUB_USERNAME,
-                    'email': GITHUB_EMAIL,
+                    'name': self.username,
+                    'email': self.email,
                     'date': datetime.utcnow().isoformat() + 'Z'
                 },
                 'committer': {
-                    'name': GITHUB_USERNAME,
-                    'email': GITHUB_EMAIL,
+                    'name': self.username,
+                    'email': self.email,
                     'date': datetime.utcnow().isoformat() + 'Z'
                 }
             }
@@ -222,6 +299,26 @@ class GitHubAutoCommit:
             return response.status_code == 200
         except Exception as e:
             logger.error(f"更新引用失败: {e}")
+            return False
+    
+    def create_reference(self, branch: str, commit_sha: str) -> bool:
+        """创建分支引用"""
+        try:
+            data = {
+                'ref': f'refs/heads/{branch}',
+                'sha': commit_sha
+            }
+            response = self._make_request(
+                'POST', f'{self.repo_url}/git/refs', json=data
+            )
+            if response.status_code == 201:
+                logger.info(f"成功创建{branch}分支")
+                return True
+            else:
+                logger.error(f"创建分支失败: {response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"创建引用失败: {e}")
             return False
     
     def create_branch(self, branch_name: str, base_sha: str) -> bool:
@@ -318,8 +415,10 @@ class GitHubAutoCommit:
             
             # 获取最新提交
             latest_sha = self.get_latest_commit_sha()
-            if not latest_sha:
-                return False, "获取最新提交失败"
+            is_empty_repo = latest_sha is None
+            
+            if is_empty_repo:
+                account_logger.info(f"[{self.account_name}] 检测到空仓库，将创建初始提交")
             
             # 生成内容
             now = datetime.now()
@@ -332,11 +431,12 @@ class GitHubAutoCommit:
                 return False, "创建blob失败"
             
             # 获取基础tree
-            response = self._make_request('GET', f'{self.repo_url}/git/commits/{latest_sha}')
-            if response.status_code != 200:
-                return False, "获取基础tree失败"
-            
-            base_tree_sha = response.json()['tree']['sha']
+            base_tree_sha = None
+            if not is_empty_repo:
+                response = self._make_request('GET', f'{self.repo_url}/git/commits/{latest_sha}')
+                if response.status_code != 200:
+                    return False, "获取基础tree失败"
+                base_tree_sha = response.json()['tree']['sha']
             
             # 创建tree
             tree_sha = self.create_tree(base_tree_sha, file_path, blob_sha)
@@ -349,31 +449,43 @@ class GitHubAutoCommit:
             )
             
             # 创建提交
-            commit_sha = self.create_commit(tree_sha, latest_sha, commit_message)
+            parent_sha = None if is_empty_repo else latest_sha
+            commit_sha = self.create_commit(tree_sha, parent_sha, commit_message)
             if not commit_sha:
                 return False, "创建提交失败"
             
-            # 创建分支
-            branch_name = f"{PR_BRANCH_PREFIX}{now.strftime('%Y%m%d-%H%M%S')}"
-            if not self.create_branch(branch_name, commit_sha):
-                return False, "创建分支失败"
-            
-            # 创建PR
-            pr_title = PR_TITLE_TEMPLATE.format(date=now.strftime('%Y-%m-%d'))
-            pr_body = PR_BODY_TEMPLATE.format(
-                date=now.strftime('%Y-%m-%d'),
-                time=now.strftime('%H:%M:%S')
-            )
-            
-            pr_url = self.create_pull_request(branch_name, pr_title, pr_body)
-            if not pr_url:
-                return False, "创建PR失败"
-            
-            account_logger.info(f"[{self.account_name}] ✅ 自动提交成功！")
-            account_logger.info(f"[{self.account_name}] 📁 文件: {file_path}")
-            account_logger.info(f"[{self.account_name}] 🔗 PR链接: {pr_url}")
-            
-            return True, pr_url
+            if is_empty_repo:
+                # 空仓库：直接创建main分支
+                if not self.create_reference('main', commit_sha):
+                    return False, "创建main分支失败"
+                
+                account_logger.info(f"[{self.account_name}] ✅ 初始提交成功！")
+                account_logger.info(f"[{self.account_name}] 📁 文件: {file_path}")
+                account_logger.info(f"[{self.account_name}] 🌟 已建立仓库初始状态")
+                
+                return True, "初始提交完成"
+            else:
+                # 非空仓库：创建分支和PR
+                branch_name = f"{PR_BRANCH_PREFIX}{now.strftime('%Y%m%d-%H%M%S')}"
+                if not self.create_branch(branch_name, commit_sha):
+                    return False, "创建分支失败"
+                
+                # 创建PR
+                pr_title = PR_TITLE_TEMPLATE.format(date=now.strftime('%Y-%m-%d'))
+                pr_body = PR_BODY_TEMPLATE.format(
+                    date=now.strftime('%Y-%m-%d'),
+                    time=now.strftime('%H:%M:%S')
+                )
+                
+                pr_url = self.create_pull_request(branch_name, pr_title, pr_body)
+                if not pr_url:
+                    return False, "创建PR失败"
+                
+                account_logger.info(f"[{self.account_name}] ✅ 自动提交成功！")
+                account_logger.info(f"[{self.account_name}] 📁 文件: {file_path}")
+                account_logger.info(f"[{self.account_name}] 🔗 PR链接: {pr_url}")
+                
+                return True, pr_url
             
         except Exception as e:
             account_logger.error(f"[{self.account_name}] 自动提交异常: {e}")

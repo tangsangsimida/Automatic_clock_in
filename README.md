@@ -56,8 +56,26 @@ nano accounts_config.json
 
 1. 访问 [GitHub Settings > Tokens](https://github.com/settings/tokens)
 2. 点击 "Generate new token (classic)"
-3. 选择权限：`repo`, `workflow`
-4. 复制生成的token到配置文件
+3. 设置Token名称和过期时间
+4. **⚠️ 重要：选择正确的权限范围**
+   - ✅ `repo` (完整仓库权限) - **必需**
+   - ✅ `user:email` (读取邮箱) - **必需**
+   - ✅ `user` (读取用户信息) - **推荐**
+5. 生成并复制Token（⚠️ 只显示一次，请妥善保存）
+
+#### Token权限说明
+
+| 权限 | 必需性 | 说明 |
+|------|--------|------|
+| `repo` | ✅ 必需 | 创建、读取、写入仓库的完整权限 |
+| `user:email` | ✅ 必需 | 读取用户邮箱地址，用于Git提交 |
+| `user` | 🔶 推荐 | 读取用户基本信息，用于验证用户名 |
+
+#### ⚠️ 常见Token问题
+
+- **权限不足**：如果Token权限不够，会导致API调用失败
+- **Token过期**：定期检查Token是否过期，及时更新
+- **Token泄露**：不要将Token提交到公共仓库，使用`.env`文件存储
 
 ### 4. 测试配置
 
@@ -255,6 +273,36 @@ sudo systemctl disable github-auto-commit
 ]
 ```
 
+### 配置字段详细说明
+
+| 字段名 | 类型 | 必填 | 说明 | 示例 |
+|--------|------|------|------|------|
+| `name` | string | ✅ | 账号标识名称，用于区分不同账号 | `"my_account"` |
+| `token` | string | ✅ | GitHub Personal Access Token | `"ghp_xxxxxxxxxxxx"` |
+| `username` | string | ✅ | **GitHub用户名**（⚠️ 重要：必须是您的真实GitHub用户名） | `"your_github_username"` |
+| `email` | string | ✅ | GitHub账号关联的邮箱地址 | `"your@email.com"` |
+| `repo` | string | ✅ | 要创建的仓库名称 | `"auto-commit-repo-1"` |
+| `enabled` | boolean | ✅ | 是否启用此账号 | `true` / `false` |
+| `commit_frequency` | string | ✅ | 提交频率类型 | `"daily"` / `"frequent"` / `"custom"` |
+| `custom_schedule` | array | ❌ | 自定义提交时间（仅当频率为custom时使用） | `["09:00", "18:00"]` |
+
+#### ⚠️ 重要提醒：username字段说明
+
+**`username` 字段必须填写您的真实GitHub用户名，而不是显示名称或其他标识！**
+
+- ✅ **正确示例**：如果您的GitHub个人主页是 `https://github.com/john_doe`，那么username应该填写 `"john_doe"`
+- ❌ **错误示例**：填写显示名称如 `"John Doe"` 或其他非用户名的标识
+
+**如何查找您的GitHub用户名：**
+1. 登录GitHub后，点击右上角头像
+2. 查看个人主页URL：`https://github.com/YOUR_USERNAME`
+3. 或者在设置页面查看：Settings → Account → Username
+
+**为什么这很重要：**
+- 系统会根据username构建仓库API地址：`https://api.github.com/repos/{username}/{repo}`
+- 如果username错误，会导致404错误，无法创建或访问仓库
+- 这是导致"创建blob失败: 404"错误的常见原因
+
 ### 提交频率选项
 
 | 频率类型 | 说明 | 提交时间 |
@@ -324,7 +372,29 @@ Automatic_clock_in/
 
 ### 常见问题
 
-1. **配置验证失败**
+1. **❌ 创建blob失败: 404 - Not Found**
+   
+   **原因分析：**
+   - 最常见原因：配置文件中的`username`字段填写错误
+   - Token权限不足或已过期
+   - 仓库不存在且创建失败
+   
+   **解决步骤：**
+   ```bash
+   # 1. 检查username配置是否正确
+   # 确认username是您的真实GitHub用户名，不是显示名称
+   
+   # 2. 验证GitHub用户名
+   curl https://api.github.com/users/YOUR_USERNAME
+   
+   # 3. 测试Token权限
+   curl -H "Authorization: token YOUR_TOKEN" https://api.github.com/user
+   
+   # 4. 检查仓库是否存在
+   curl -H "Authorization: token YOUR_TOKEN" https://api.github.com/repos/YOUR_USERNAME/YOUR_REPO
+   ```
+
+2. **配置验证失败**
    ```bash
    # 检查环境变量是否正确设置
    cat .env
@@ -333,7 +403,7 @@ Automatic_clock_in/
    curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
    ```
 
-2. **服务启动失败**
+3. **服务启动失败**
    ```bash
    # 查看详细错误信息
    sudo journalctl -u github-auto-commit -n 50
@@ -342,7 +412,7 @@ Automatic_clock_in/
    sudo systemctl cat github-auto-commit
    ```
 
-3. **权限问题**
+4. **权限问题**
    ```bash
    # 确保脚本有执行权限
    chmod +x *.sh
@@ -351,7 +421,7 @@ Automatic_clock_in/
    ls -la
    ```
 
-4. **网络连接问题**
+5. **网络连接问题**
    ```bash
    # 测试GitHub API连接
    curl -I https://api.github.com
