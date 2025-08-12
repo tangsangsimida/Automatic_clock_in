@@ -1,19 +1,19 @@
-# 多Token同时提交到一个仓库使用指南
+# 多用户同时提交到一个仓库使用指南
 
 ## 概述
 
-本项目支持使用多个GitHub Token以同一用户身份向同一个仓库提交代码，这在以下场景中非常有用：
-- 多设备开发环境
-- Token备份和容错
-- 时间分散的自动提交
-- 提高仓库活跃度的真实性
-- 多环境部署自动化
+本项目支持多个GitHub用户同时向同一个仓库提交代码，这在以下场景中非常有用：
+- 团队协作开发
+- 多人维护同一项目
+- 开源项目贡献
+- 提高仓库的活跃度和多样性
+- 分布式团队开发
 
 ## 配置方法
 
 ### 1. 基本配置结构
 
-在 `data/accounts_config.json` 中配置多个账号指向同一个仓库：
+在 `data/accounts_config.json` 中配置多个用户账号指向同一个仓库：
 
 ```json
 {
@@ -21,9 +21,9 @@
     {
       "name": "主开发者",
       "token": "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-      "username": "shared-owner",
+      "username": "developer1",
       "email": "dev1@example.com",
-      "repo": "shared-owner/shared-repo",
+      "repo": "owner/shared-repo",
       "enabled": true,
       "commit_frequency": "high",
       "custom_schedule": "0 9,14,18 * * *",
@@ -32,20 +32,20 @@
     {
       "name": "协作开发者",
       "token": "ghp_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
-      "username": "shared-owner",
+      "username": "developer2",
       "email": "dev2@example.com",
-      "repo": "shared-owner/shared-repo",
+      "repo": "owner/shared-repo",
       "enabled": true,
       "commit_frequency": "medium",
       "custom_schedule": "0 10,15,19 * * *",
       "description": "协作开发账号"
     },
     {
-      "name": "测试账号",
+      "name": "测试工程师",
       "token": "ghp_zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
-      "username": "shared-owner",
+      "username": "tester1",
       "email": "test@example.com",
-      "repo": "shared-owner/shared-repo",
+      "repo": "owner/shared-repo",
       "enabled": true,
       "commit_frequency": "low",
       "custom_schedule": "0 16 * * *",
@@ -59,8 +59,8 @@
 
 #### 仓库配置
 - **相同仓库**：所有账号的 `repo` 字段设置为同一个仓库
-- **相同用户名**：⚠️ **重要**：所有账号的 `username` 字段必须相同，且与 `repo` 中的用户名一致
-- **不同权限**：确保所有账号都有该仓库的写入权限
+- **不同用户名**：每个账号使用不同的 `username`，对应不同的GitHub用户
+- **协作者权限**：⚠️ **重要**：仓库所有者必须将所有协作用户添加为仓库的Collaborator
 
 #### 时间调度
 - **错开时间**：使用不同的 `custom_schedule` 避免同时提交(建议)
@@ -68,9 +68,9 @@
 
 #### 身份区分
 - **不同邮箱**：每个账号使用不同的 `email`
-- **相同用户名**：⚠️ **注意**：所有账号必须使用相同的 `username`，这是技术限制
+- **不同用户名**：每个账号使用不同的 `username`，对应真实的GitHub用户
 - **不同名称**：通过 `name` 字段区分不同账号的用途
-- **描述标识**：在 `description` 中标明账号用途
+- **描述标识**：在 `description` 中标明账号用途和角色
 
 ## 最佳实践
 
@@ -94,9 +94,23 @@
 ### 3. 权限管理
 
 #### GitHub仓库设置
-1. 将所有协作账号添加为仓库的 Collaborator
-2. 设置适当的权限级别（Write 或 Admin）
-3. 确保仓库允许多人推送
+
+**添加协作者步骤**：
+1. 进入目标仓库页面
+2. 点击 `Settings` 选项卡
+3. 在左侧菜单中选择 `Collaborators and teams`
+4. 点击 `Add people` 按钮
+5. 输入协作者的GitHub用户名或邮箱
+6. 选择权限级别：
+   - **Write**：可以推送代码、创建分支、管理Issues和PR
+   - **Maintain**：Write权限 + 管理仓库设置
+   - **Admin**：完全控制权限
+7. 发送邀请，协作者接受后即可获得权限
+
+**权限级别建议**：
+- **主开发者**：Admin 或 Maintain
+- **协作开发者**：Write
+- **测试人员**：Write
 
 #### Token权限
 每个账号的Token需要包含以下权限：
@@ -104,38 +118,30 @@
 - `user:email` - 访问用户邮箱信息
 - `read:user` - 读取用户基本信息
 
-## ⚠️ 重要技术限制
+## ⚠️ 重要配置要求
 
-### username 和 repo 字段的匹配要求
+### 协作者权限设置
 
-**关键限制**：要实现多个账号提交到同一个仓库，必须满足以下条件：
+**必要条件**：要实现多个用户提交到同一个仓库，必须满足以下条件：
 
-1. **username 字段必须相同**：所有账号的 `username` 字段必须设置为相同的值
-2. **repo 字段匹配**：`repo` 字段中的用户名部分必须与 `username` 字段一致
-3. **示例说明**：
-   ```json
-   // ✅ 正确配置
-   {
-     "username": "shared-owner",
-     "repo": "shared-owner/my-repo"
-   }
-   
-   // ❌ 错误配置
-   {
-     "username": "user1",
-     "repo": "shared-owner/my-repo"  // username 与 repo 中的用户名不匹配
-   }
-   ```
+1. **仓库权限**：所有协作用户必须被添加为仓库的Collaborator
+2. **Token权限**：每个用户的Token必须有足够的权限访问目标仓库
+3. **配置正确性**：确保每个账号的 `username` 对应真实的GitHub用户名
 
-**技术原因**：
-- 系统使用 `username` 字段来确定提交者身份
-- `repo` 字段用于确定目标仓库
-- 两者必须匹配才能正确执行 Git 操作
+**配置验证**：
+```json
+// ✅ 正确配置示例
+{
+  "username": "developer1",        // 真实的GitHub用户名
+  "repo": "owner/shared-repo",     // 目标仓库
+  "token": "ghp_xxx..."            // 该用户的有效Token
+}
+```
 
-**实际应用**：
-- 这意味着多个账号实际上是使用不同的 Token 以同一个用户身份提交
-- 通过不同的 `email` 和 `name` 字段来区分提交记录
-- 适用于一个用户拥有多个 Token 或多个设备的场景
+**权限验证步骤**：
+1. 确认用户已被添加为仓库协作者
+2. 验证Token具有仓库访问权限
+3. 测试提交权限是否正常
 
 ## 注意事项
 
