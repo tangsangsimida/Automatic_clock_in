@@ -33,6 +33,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# PID文件路径
+PID_FILE = '/tmp/github-auto-commit.pid'
+
+def write_pid_file():
+    """写入PID文件"""
+    try:
+        with open(PID_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        logger.info(f"PID文件已创建: {PID_FILE}")
+    except Exception as e:
+        logger.warning(f"无法创建PID文件: {e}")
+
+def remove_pid_file():
+    """删除PID文件"""
+    try:
+        if os.path.exists(PID_FILE):
+            os.remove(PID_FILE)
+            logger.info(f"PID文件已删除: {PID_FILE}")
+    except Exception as e:
+        logger.warning(f"无法删除PID文件: {e}")
+
 class AutoCommitScheduler:
     """自动提交调度器"""
     
@@ -53,6 +74,7 @@ class AutoCommitScheduler:
         """信号处理器"""
         logger.info(f"收到信号 {signum}，正在停止调度器...")
         self.stop()
+        remove_pid_file()
         sys.exit(0)
     
     def _reload_config_handler(self, signum, frame):
@@ -345,6 +367,10 @@ def main():
             if args.daemon:
                 # 守护进程模式
                 logger.info("🔄 以守护进程模式运行，按 Ctrl+C 停止")
+                
+                # 创建PID文件
+                write_pid_file()
+                
                 try:
                     while scheduler.running:
                         time.sleep(1)
@@ -352,6 +378,7 @@ def main():
                     logger.info("收到中断信号，正在停止...")
                 finally:
                     scheduler.stop()
+                    remove_pid_file()
             else:
                 # 交互模式
                 logger.info("🎮 交互模式启动，输入命令:")

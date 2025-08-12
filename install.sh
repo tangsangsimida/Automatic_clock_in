@@ -211,16 +211,94 @@ create_management_scripts() {
     # 创建启动脚本
     cat > "$SCRIPT_DIR/start.sh" << 'EOF'
 #!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-source venv/bin/activate
-python scheduler.py --daemon
+
+# GitHub自动提交系统启动脚本
+
+SERVICE_NAME="github-auto-commit"
+
+echo "🚀 GitHub自动提交系统启动脚本"
+echo "===================================="
+
+# 检查服务是否已经在运行
+if systemctl is-active --quiet $SERVICE_NAME; then
+    echo "✅ 服务已经在运行中"
+    echo "📊 服务状态:"
+    sudo systemctl status $SERVICE_NAME --no-pager -l
+    exit 0
+fi
+
+# 启动systemd服务
+echo "🔄 正在启动systemd服务..."
+sudo systemctl start $SERVICE_NAME
+
+# 检查启动结果
+if systemctl is-active --quiet $SERVICE_NAME; then
+    echo "✅ 服务启动成功！"
+    echo "📊 服务状态:"
+    sudo systemctl status $SERVICE_NAME --no-pager -l
+    echo ""
+    echo "💡 管理命令:"
+    echo "  查看状态: ./status.sh"
+    echo "  停止服务: ./stop.sh"
+    echo "  重载配置: ./reload_config.sh"
+    echo "  查看日志: sudo journalctl -u $SERVICE_NAME -f"
+else
+    echo "❌ 服务启动失败"
+    echo "📋 错误信息:"
+    sudo systemctl status $SERVICE_NAME --no-pager -l
+    exit 1
+fi
 EOF
     
     # 创建停止脚本
     cat > "$SCRIPT_DIR/stop.sh" << 'EOF'
 #!/bin/bash
-sudo systemctl stop github-auto-commit
+
+# GitHub自动提交系统停止脚本
+
+SERVICE_NAME="github-auto-commit"
+PID_FILE="/tmp/github-auto-commit.pid"
+
+echo "🛑 GitHub自动提交系统停止脚本"
+echo "===================================="
+
+# 检查systemd服务是否在运行
+if systemctl is-active --quiet $SERVICE_NAME; then
+    echo "🔄 正在停止systemd服务..."
+    sudo systemctl stop $SERVICE_NAME
+    
+    if systemctl is-active --quiet $SERVICE_NAME; then
+        echo "❌ systemd服务停止失败"
+        exit 1
+    else
+        echo "✅ systemd服务已停止"
+    fi
+else
+    echo "ℹ️  systemd服务未运行"
+fi
+
+# 检查是否有直接运行的进程
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat $PID_FILE)
+    if kill -0 $PID 2>/dev/null; then
+        echo "🔄 正在停止直接运行的进程 (PID: $PID)..."
+        kill $PID
+        sleep 2
+        
+        if kill -0 $PID 2>/dev/null; then
+            echo "⚠️  进程未响应，强制终止..."
+            kill -9 $PID
+        fi
+        
+        rm -f $PID_FILE
+        echo "✅ 直接运行的进程已停止"
+    else
+        echo "🧹 清理无效的PID文件"
+        rm -f $PID_FILE
+    fi
+fi
+
+echo "✅ 所有相关进程已停止"
 EOF
     
     # 创建状态检查脚本
@@ -240,6 +318,79 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 source venv/bin/activate
 python scheduler.py --run-once
+EOF
+
+    # 创建直接启动脚本（备用方案）
+    cat > "$SCRIPT_DIR/start_direct.sh" << 'EOF'
+#!/bin/bash
+
+# GitHub自动提交系统直接启动脚本（备用方案）
+# 当systemd服务有问题时使用
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PID_FILE="/tmp/github-auto-commit.pid"
+LOG_FILE="$SCRIPT_DIR/data/direct_run.log"
+
+echo "🚀 GitHub自动提交系统直接启动脚本"
+echo "======================================"
+echo "⚠️  这是备用启动方案，建议优先使用 ./start.sh"
+echo ""
+
+# 检查是否已经在运行
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat $PID_FILE)
+    if kill -0 $PID 2>/dev/null; then
+        echo "❌ 进程已在运行 (PID: $PID)"
+        echo "💡 如需重启，请先运行: ./stop.sh"
+        exit 1
+    else
+        echo "🧹 清理无效的PID文件"
+        rm -f $PID_FILE
+    fi
+fi
+
+# 检查systemd服务是否在运行
+if systemctl is-active --quiet github-auto-commit; then
+    echo "❌ systemd服务正在运行，请使用 ./stop.sh 停止后再使用直接启动"
+    exit 1
+fi
+
+cd "$SCRIPT_DIR"
+
+# 检查虚拟环境
+if [ ! -d "venv" ]; then
+    echo "❌ 虚拟环境不存在，请重新运行安装脚本"
+    exit 1
+fi
+
+echo "🔄 正在启动服务..."
+
+# 启动服务并记录PID
+source venv/bin/activate
+nohup python scheduler.py --daemon > "$LOG_FILE" 2>&1 &
+PID=$!
+
+# 保存PID
+echo $PID > "$PID_FILE"
+
+# 等待一下检查是否启动成功
+sleep 3
+
+if kill -0 $PID 2>/dev/null; then
+    echo "✅ 服务启动成功！(PID: $PID)"
+    echo "📋 日志文件: $LOG_FILE"
+    echo "📋 PID文件: $PID_FILE"
+    echo ""
+    echo "💡 管理命令:"
+    echo "  停止服务: ./stop.sh"
+    echo "  查看日志: tail -f $LOG_FILE"
+    echo "  重载配置: ./reload_config.sh"
+else
+    echo "❌ 服务启动失败"
+    rm -f "$PID_FILE"
+    echo "📋 请检查日志: $LOG_FILE"
+    exit 1
+fi
 EOF
 
     # 创建配置重载脚本
@@ -384,20 +535,41 @@ main() {
     
     create_management_scripts
     
+    # 自动启动服务
+    echo
+    log_info "正在启动服务..."
+    
+    if sudo systemctl start github-auto-commit; then
+        log_success "服务启动成功！"
+        
+        # 等待一下让服务完全启动
+        sleep 2
+        
+        # 检查服务状态
+        if systemctl is-active --quiet github-auto-commit; then
+            log_success "服务运行正常"
+        else
+            log_warning "服务可能启动异常，请检查日志"
+        fi
+    else
+        log_error "服务启动失败，请手动启动: sudo systemctl start github-auto-commit"
+    fi
+    
     echo
     log_success "安装完成！"
     echo
     log_info "下一步操作:"
     log_info "1. 编辑 data/accounts_config.json 文件，填写您的GitHub信息"
     log_info "2. 运行测试: ./run_once.sh"
-    log_info "3. 启动服务: sudo systemctl start github-auto-commit"
+    log_info "3. 重载配置: ./reload_config.sh (修改配置后)"
     log_info "4. 查看状态: ./status.sh"
     echo
     log_info "管理命令:"
-    log_info "  启动服务: sudo systemctl start github-auto-commit"
-    log_info "  停止服务: sudo systemctl stop github-auto-commit"
+    log_info "  启动服务: ./start.sh (推荐) 或 sudo systemctl start github-auto-commit"
+    log_info "  停止服务: ./stop.sh 或 sudo systemctl stop github-auto-commit"
+    log_info "  直接启动: ./start_direct.sh (备用方案，当systemd有问题时使用)"
     log_info "  重载配置: ./reload_config.sh (无需重启服务)"
-    log_info "  查看状态: sudo systemctl status github-auto-commit"
+    log_info "  查看状态: ./status.sh 或 sudo systemctl status github-auto-commit"
     log_info "  查看日志: sudo journalctl -u github-auto-commit -f"
     echo
     log_info "💡 配置热重载功能:"
