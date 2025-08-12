@@ -14,6 +14,7 @@
 - 📝 **详细日志**: 完整的操作日志记录，每个账号独立日志
 - 🎮 **交互模式**: 支持命令行交互操作
 - 🚀 **并发执行**: 多账号并发提交，提高效率
+- 🔥 **配置热重载**: 修改配置后无需重启服务，自动检测并应用新配置
 
 ## 📋 系统要求
 
@@ -166,6 +167,9 @@ sudo systemctl stop github-auto-commit
 # 重启服务
 sudo systemctl restart github-auto-commit
 
+# 重载配置（无需重启服务）
+./reload_config.sh
+
 # 查看状态
 sudo systemctl status github-auto-commit
 
@@ -178,6 +182,25 @@ sudo systemctl enable github-auto-commit
 # 禁用自启
 sudo systemctl disable github-auto-commit
 ```
+
+### 🔥 配置热重载功能
+
+系统支持配置热重载，修改配置文件后无需重启服务：
+
+```bash
+# 方式1: 手动重载配置
+./reload_config.sh
+
+# 方式2: 自动检测（系统每30秒自动检查配置文件变化）
+# 只需修改 data/accounts_config.json 文件，系统会自动重载
+```
+
+**配置重载特性：**
+- ✅ 无需重启服务，配置立即生效
+- ✅ 自动检测配置文件变化（30秒检查间隔）
+- ✅ 支持手动触发重载
+- ✅ 配置错误时自动回退到旧配置
+- ✅ 重载过程完全透明，不影响正在运行的任务
 
 ## 🗑️ 卸载系统
 

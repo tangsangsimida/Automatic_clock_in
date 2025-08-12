@@ -242,6 +242,80 @@ cd "$SCRIPT_DIR"
 source venv/bin/activate
 python scheduler.py --run-once
 EOF
+
+    # 创建配置重载脚本
+    cat > "$SCRIPT_DIR/reload_config.sh" << 'EOF'
+#!/bin/bash
+
+# GitHub自动提交系统 - 配置重载脚本
+# 用于在不重启服务的情况下重新加载配置文件
+
+SERVICE_NAME="github-auto-commit"
+PID_FILE="/tmp/github-auto-commit.pid"
+
+echo "🔄 GitHub自动提交系统 - 配置重载工具"
+echo "========================================"
+
+# 检查服务是否在运行
+if systemctl is-active --quiet $SERVICE_NAME; then
+    echo "📡 检测到systemd服务正在运行，发送重载信号..."
+    
+    # 获取服务的主进程ID
+    SERVICE_PID=$(systemctl show --property MainPID --value $SERVICE_NAME)
+    
+    if [ "$SERVICE_PID" != "0" ] && [ -n "$SERVICE_PID" ]; then
+        echo "📋 向进程 $SERVICE_PID 发送SIGHUP信号..."
+        kill -HUP $SERVICE_PID
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ 配置重载信号已发送成功"
+            echo "📝 请查看服务日志确认配置是否重载成功:"
+            echo "   sudo journalctl -u $SERVICE_NAME -f"
+        else
+            echo "❌ 发送重载信号失败"
+            exit 1
+        fi
+    else
+        echo "❌ 无法获取服务进程ID"
+        exit 1
+    fi
+    
+elif [ -f "$PID_FILE" ]; then
+    echo "📡 检测到PID文件，发送重载信号..."
+    
+    PID=$(cat $PID_FILE)
+    if kill -0 $PID 2>/dev/null; then
+        echo "📋 向进程 $PID 发送SIGHUP信号..."
+        kill -HUP $PID
+        
+        if [ $? -eq 0 ]; then
+            echo "✅ 配置重载信号已发送成功"
+        else
+            echo "❌ 发送重载信号失败"
+            exit 1
+        fi
+    else
+        echo "❌ PID文件中的进程不存在，清理PID文件"
+        rm -f $PID_FILE
+        exit 1
+    fi
+    
+else
+    echo "❌ 服务未运行"
+    echo "💡 请先启动服务:"
+    echo "   sudo systemctl start $SERVICE_NAME"
+    echo "   或者使用: ./start.sh"
+    exit 1
+fi
+
+echo ""
+echo "📖 使用说明:"
+echo "• 配置重载后，新的定时任务将立即生效"
+echo "• 如果配置有错误，系统会继续使用旧配置"
+echo "• 建议修改配置前先备份原文件"
+echo "• 可以通过以下命令查看当前配置状态:"
+echo "   ./status.sh"
+EOF
     
     # 设置执行权限
     chmod +x "$SCRIPT_DIR"/*.sh
@@ -323,8 +397,14 @@ main() {
     log_info "管理命令:"
     log_info "  启动服务: sudo systemctl start github-auto-commit"
     log_info "  停止服务: sudo systemctl stop github-auto-commit"
+    log_info "  重载配置: ./reload_config.sh (无需重启服务)"
     log_info "  查看状态: sudo systemctl status github-auto-commit"
     log_info "  查看日志: sudo journalctl -u github-auto-commit -f"
+    echo
+    log_info "💡 配置热重载功能:"
+    log_info "  • 修改配置文件后，系统会在30秒内自动检测并重载"
+    log_info "  • 也可以手动执行 ./reload_config.sh 立即重载配置"
+    log_info "  • 重载过程中服务不会中断，新配置立即生效"
     echo
 }
 

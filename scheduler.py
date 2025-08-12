@@ -13,11 +13,13 @@ from typing import List
 import threading
 import signal
 import sys
+import os
 
 from auto_commit import GitHubAutoCommit, run_multi_account_commits
 from config import (
     LOG_FILE, validate_config,
-    load_accounts_config, list_enabled_accounts
+    load_accounts_config, list_enabled_accounts,
+    GITHUB_ACCOUNTS_CONFIG
 )
 
 # 配置日志
@@ -38,10 +40,12 @@ class AutoCommitScheduler:
         self.accounts = load_accounts_config()
         self.running = False
         self.thread = None
+        self.config_mtime = self._get_config_mtime()
         
         # 注册信号处理器
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+        signal.signal(signal.SIGHUP, self._reload_config_handler)  # 添加配置重载信号
         
         logger.info(f"加载了 {len(self.accounts)} 个账号配置")
     
@@ -50,6 +54,54 @@ class AutoCommitScheduler:
         logger.info(f"收到信号 {signum}，正在停止调度器...")
         self.stop()
         sys.exit(0)
+    
+    def _reload_config_handler(self, signum, frame):
+        """配置重载信号处理器"""
+        logger.info(f"收到配置重载信号 {signum}，正在重新加载配置...")
+        self.reload_config()
+    
+    def _get_config_mtime(self):
+        """获取配置文件修改时间"""
+        try:
+            if os.path.exists(GITHUB_ACCOUNTS_CONFIG):
+                return os.path.getmtime(GITHUB_ACCOUNTS_CONFIG)
+        except Exception:
+            pass
+        return 0
+    
+    def _check_config_changed(self):
+        """检查配置文件是否已修改"""
+        current_mtime = self._get_config_mtime()
+        if current_mtime > self.config_mtime:
+            self.config_mtime = current_mtime
+            return True
+        return False
+    
+    def reload_config(self):
+        """重新加载配置"""
+        try:
+            logger.info("🔄 正在重新加载配置...")
+            
+            # 重新加载账号配置
+            old_accounts_count = len(self.accounts)
+            self.accounts = load_accounts_config()
+            new_accounts_count = len(self.accounts)
+            
+            # 验证新配置
+            validate_config()
+            
+            # 重新设置定时任务
+            self.setup_schedule()
+            
+            logger.info(f"✅ 配置重载完成: {old_accounts_count} -> {new_accounts_count} 个账号")
+            logger.info("📋 新的定时任务已生效")
+            
+            # 更新配置文件修改时间
+            self.config_mtime = self._get_config_mtime()
+            
+        except Exception as e:
+            logger.error(f"❌ 配置重载失败: {e}")
+            logger.warning("⚠️ 继续使用旧配置运行")
     
     def execute_commit_task(self):
         """执行提交任务"""
@@ -126,10 +178,20 @@ class AutoCommitScheduler:
     def run_scheduler(self):
         """运行调度器"""
         logger.info("🚀 调度器开始运行")
+        config_check_counter = 0
         
         while self.running:
             try:
                 schedule.run_pending()
+                
+                # 每30秒检查一次配置文件是否有变化
+                config_check_counter += 1
+                if config_check_counter >= 30:  # 30秒检查一次
+                    config_check_counter = 0
+                    if self._check_config_changed():
+                        logger.info("📝 检测到配置文件变化，自动重新加载...")
+                        self.reload_config()
+                
                 time.sleep(1)
             except Exception as e:
                 logger.error(f"调度器运行异常: {e}")
