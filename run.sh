@@ -115,12 +115,6 @@ install_deps() {
 test_config() {
     log_info "开始测试配置..."
     
-    if [[ ! -f ".env" ]]; then
-        log_error "配置文件不存在: .env"
-        return 1
-    fi
-    
-    source .env
     source venv/bin/activate
     
     # 运行测试脚本
@@ -286,7 +280,7 @@ main() {
         -i|--install)
             install_deps
             check_config
-            log_info "安装完成，请编辑 .env 文件后运行 --test-config 测试配置"
+            log_info "安装完成，请编辑 data/accounts_config.json 文件后运行 --test-config 测试配置"
             exit 0
             ;;
         -t|--test|--test-config)

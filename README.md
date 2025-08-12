@@ -76,7 +76,7 @@ nano accounts_config.json
 
 - **权限不足**：如果Token权限不够，会导致API调用失败
 - **Token过期**：定期检查Token是否过期，及时更新
-- **Token泄露**：不要将Token提交到公共仓库，使用`.env`文件存储
+- **Token泄露**：不要将Token提交到公共仓库，使用`data/accounts_config.json`文件存储
 
 ### 4. 测试配置
 
@@ -246,7 +246,7 @@ sudo systemctl disable github-auto-commit
 - ✅ **虚拟环境**: 删除 `venv/` 目录
 - ✅ **数据文件**: 删除 `data/` 目录（包括账号配置）
 - ✅ **日志文件**: 删除 `logs/` 目录（可选保留）
-- ✅ **配置文件**: 删除 `.env` 和 `config.local.py`（可选保留）
+- ✅ **配置文件**: 删除 `data/accounts_config.json`（可选保留）
 - ✅ **临时文件**: 清理 `*.pyc`、`__pycache__`、`*.pid` 等
 
 ### 注意事项
@@ -341,10 +341,11 @@ sudo systemctl disable github-auto-commit
 ```python
 # 提交频率选项
 COMMIT_FREQUENCY_OPTIONS = {
-    'daily': ['09:00'],
-    'frequent': ['09:00', '14:00', '20:00'],
-    'hourly': ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'],
-    'minimal': ['12:00'],
+    "daily': ["09:00"],
+	# 时间格式必须为两位数，不足补零
+    'frequent': ["09:00", "14:00", "20:00"],
+    'hourly': ["09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"],
+    'minimal': ["12:00"],
     'custom': []  # 由 custom_schedule 指定
 }
 
@@ -374,8 +375,8 @@ Automatic_clock_in/
 ├── uninstall.sh            # 卸载脚本
 ├── test.py                 # 系统测试脚本
 ├── requirements.txt        # Python依赖
-├── .env                    # 环境变量配置
-├── .env.example            # 环境变量模板
+├── data/
+│   └── accounts_config.json # 多账号配置文件
 ├── accounts_config.example.json  # 多账号配置模板
 ├── .gitignore              # Git忽略文件
 ├── data/                   # 数据目录
@@ -420,7 +421,7 @@ Automatic_clock_in/
 2. **配置验证失败**
    ```bash
    # 检查环境变量是否正确设置
-   cat .env
+   cat data/accounts_config.json
    
    # 测试GitHub Token是否有效
    curl -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/user
@@ -476,7 +477,7 @@ sudo journalctl -u github-auto-commit -p err
 2. **文件权限**
    ```bash
    # 设置配置文件权限
-   chmod 600 .env
+   chmod 600 data/accounts_config.json
    
    # 确保日志目录权限
    chmod 755 logs/

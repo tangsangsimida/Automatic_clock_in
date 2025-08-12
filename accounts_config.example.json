@@ -16,10 +16,10 @@
     "username": "your_username_2",
     "email": "your_email_2@example.com",
     "repo": "auto-commit-repo-2",
-    "enabled": true,
+    "enabled": false,
     "commit_frequency": "frequent",
     "custom_schedule": [],
-    "description": "副账号 - 频繁提交保持活跃"
+    "description": "副账号 - 频繁提交保持活跃 (默认禁用)"
   },
   {
     "name": "account3",
@@ -38,10 +38,10 @@
     "username": "your_work_username",
     "email": "your_work_email@company.com",
     "repo": "work-activity-tracker",
-    "enabled": true,
+    "enabled": false,
     "commit_frequency": "hourly",
     "custom_schedule": [],
-    "description": "工作账号 - 工作时间每小时提交"
+    "description": "工作账号 - 工作时间每小时提交 (默认禁用)"
   },
   {
     "name": "minimal_account",
@@ -49,9 +49,9 @@
     "username": "your_minimal_username",
     "email": "your_minimal_email@example.com",
     "repo": "minimal-commits",
-    "enabled": true,
+    "enabled": false,
     "commit_frequency": "minimal",
     "custom_schedule": [],
-    "description": "最少提交账号 - 每天中午提交一次"
+    "description": "最少提交账号 - 每天中午提交一次 (默认禁用)"
   }
 ]

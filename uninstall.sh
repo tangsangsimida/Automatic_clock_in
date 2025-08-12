@@ -267,7 +267,7 @@ show_removal_summary() {
     fi
     
     if [[ "$KEEP_CONFIG" != "true" ]]; then
-        [[ -f "$SCRIPT_DIR/.env" ]] && echo "  ✓ 配置文件 (.env)"
+        [[ -f "$SCRIPT_DIR/data/accounts_config.json" ]] && echo "  ✓ 配置文件 (accounts_config.json)"
         [[ -f "$SCRIPT_DIR/config.local.py" ]] && echo "  ✓ 配置文件 (config.local.py)"
     fi
     

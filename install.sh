@@ -107,7 +107,6 @@ setup_config() {
     log_info "正在设置配置..."
     
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    ENV_FILE="$SCRIPT_DIR/.env"
     
     # 创建data目录
     mkdir -p "$SCRIPT_DIR/data"
