@@ -28,7 +28,9 @@ DEFAULT_ACCOUNTS_CONFIG = [
         "enabled": True,
         "commit_times": ["09:00", "18:00"],
         "commit_frequency": "daily",  # daily, hourly, custom
-        "custom_schedule": []  # 自定义时间表，格式: ["HH:MM", ...]
+        "custom_schedule": [],  # 自定义时间表，格式: ["HH:MM", ...]
+        "auto_merge": True,  # 是否自动合并PR
+        "delete_branch_after_merge": True  # 合并后是否删除分支
     }
 ]
 
@@ -118,6 +120,8 @@ def load_accounts_config() -> List[Dict[str, Any]]:
         account.setdefault('repo', f'auto-commit-repo-{i+1}')
         account.setdefault('commit_frequency', 'daily')
         account.setdefault('custom_schedule', [])
+        account.setdefault('auto_merge', True)
+        account.setdefault('delete_branch_after_merge', True)
         
         # 根据频率设置提交时间
         frequency = account['commit_frequency']
@@ -191,7 +195,9 @@ def create_accounts_config_template(file_path: str = None) -> str:
             "repo": "auto-commit-repo-1",
             "enabled": True,
             "commit_frequency": "daily",
-            "custom_schedule": []
+            "custom_schedule": [],
+            "auto_merge": True,
+            "delete_branch_after_merge": True
         },
         {
             "name": "account2",
@@ -201,7 +207,9 @@ def create_accounts_config_template(file_path: str = None) -> str:
             "repo": "auto-commit-repo-2",
             "enabled": True,
             "commit_frequency": "frequent",
-            "custom_schedule": []
+            "custom_schedule": [],
+            "auto_merge": True,
+            "delete_branch_after_merge": True
         },
         {
             "name": "account3",
@@ -211,7 +219,9 @@ def create_accounts_config_template(file_path: str = None) -> str:
             "repo": "auto-commit-repo-3",
             "enabled": False,
             "commit_frequency": "custom",
-            "custom_schedule": ["10:30", "14:15", "20:00"]
+            "custom_schedule": ["10:30", "14:15", "20:00"],
+            "auto_merge": False,
+            "delete_branch_after_merge": False
         }
     ]
     

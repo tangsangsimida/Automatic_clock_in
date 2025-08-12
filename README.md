@@ -7,6 +7,9 @@
 - 🕒 **定时提交**: 每天自动在指定时间提交代码
 - 👥 **多账号支持**: 同时管理多个GitHub账号的自动提交
 - 🔄 **自动PR**: 自动创建Pull Request保持活跃
+- 🤖 **自动合并**: 创建PR后自动合并到主分支，无需手动操作
+- 🗑️ **智能清理**: 合并后自动删除临时分支，保持仓库整洁
+- 📁 **文件隔离**: 每个用户的提交文件放在独立文件夹，避免冲突
 - 📊 **智能内容**: 生成随机的提交内容和技术栈信息
 - ⚙️ **灵活配置**: 支持自定义提交时间和频率
 - 📅 **多种频率**: 支持每日、频繁、每小时、最少、自定义等提交模式
@@ -15,6 +18,116 @@
 - 🎮 **交互模式**: 支持命令行交互操作
 - 🚀 **并发执行**: 多账号并发提交，提高效率
 - 🔥 **配置热重载**: 修改配置后无需重启服务，自动检测并应用新配置
+
+## 🤖 自动合并功能详解
+
+### 🎯 功能概述
+
+自动合并功能是本系统的核心特性之一，它能够在创建Pull Request后自动完成合并操作，无需手动干预，让您的GitHub贡献图保持持续活跃。
+
+### ✨ 主要特性
+
+#### 🔄 自动PR合并
+- **智能合并**: 创建PR后自动检测并合并到主分支
+- **安全可靠**: 只合并系统自动创建的PR，不影响其他手动PR
+- **状态监控**: 实时监控PR状态，确保合并成功
+
+#### 🗑️ 智能分支清理
+- **自动删除**: 合并成功后自动删除临时分支
+- **保持整洁**: 避免仓库中积累大量无用分支
+- **可配置**: 支持选择是否启用分支删除功能
+
+#### 📁 用户文件隔离
+- **独立目录**: 每个用户的提交文件存放在 `users/{username}/daily_commits/` 目录下
+- **避免冲突**: 多用户同时使用时不会产生文件冲突
+- **清晰管理**: 便于区分和管理不同用户的提交内容
+
+### ⚙️ 配置选项
+
+在账号配置中，您可以通过以下选项控制自动合并行为：
+
+```json
+{
+  "auto_merge": true,                    // 是否启用自动合并（默认：true）
+  "delete_branch_after_merge": true      // 合并后是否删除分支（默认：true）
+}
+```
+
+#### 配置说明
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `auto_merge` | boolean | `true` | 控制是否在创建PR后自动合并 |
+| `delete_branch_after_merge` | boolean | `true` | 控制合并成功后是否删除临时分支 |
+
+### 🔧 使用场景
+
+#### 场景1：完全自动化（推荐）
+```json
+{
+  "auto_merge": true,
+  "delete_branch_after_merge": true
+}
+```
+- ✅ 创建PR → 自动合并 → 自动删除分支
+- ✅ 完全无人值守，保持仓库整洁
+- ✅ 适合个人项目和自动化场景
+
+#### 场景2：仅自动合并
+```json
+{
+  "auto_merge": true,
+  "delete_branch_after_merge": false
+}
+```
+- ✅ 创建PR → 自动合并
+- ❌ 保留分支（需要手动清理）
+- 🎯 适合需要保留分支历史的场景
+
+#### 场景3：手动控制
+```json
+{
+  "auto_merge": false,
+  "delete_branch_after_merge": false
+}
+```
+- ✅ 仅创建PR，不自动合并
+- 🎯 适合需要代码审查的团队项目
+- 🎯 适合谨慎的生产环境
+
+### 🛡️ 安全保障
+
+- **权限验证**: 使用您的GitHub Token进行操作，确保安全性
+- **错误处理**: 完善的异常处理机制，操作失败时不会影响系统稳定性
+- **日志记录**: 详细记录每次操作，便于问题排查和审计
+- **状态检查**: 合并前检查PR状态，确保操作的正确性
+
+### 📊 工作流程
+
+```
+1. 📝 生成提交内容
+   ↓
+2. 🌿 创建新分支 (auto-commit-YYYYMMDD-HHMMSS)
+   ↓
+3. 📤 推送到远程仓库
+   ↓
+4. 🔄 创建Pull Request
+   ↓
+5. 🤖 自动合并PR (如果启用)
+   ↓
+6. 🗑️ 删除临时分支 (如果启用)
+   ↓
+7. ✅ 完成，等待下次执行
+```
+
+### 💡 最佳实践
+
+1. **个人项目**: 建议启用完全自动化模式
+2. **团队项目**: 建议关闭自动合并，保留代码审查流程
+3. **测试环境**: 可以启用自动合并，便于快速迭代
+4. **生产环境**: 建议谨慎使用，根据团队规范决定
+
+> 💡 **提示**: 更多详细信息请参考 [自动合并功能指南](docs/auto-merge-guide.md)
 
 ## 📋 系统要求
 
@@ -274,7 +387,9 @@ sudo systemctl disable github-auto-commit
     "repo": "auto-commit-repo-1",
     "enabled": true,
     "commit_frequency": "daily",
-    "custom_schedule": []
+    "custom_schedule": [],
+    "auto_merge": true,
+    "delete_branch_after_merge": true
   },
   {
     "name": "account2",
@@ -284,7 +399,9 @@ sudo systemctl disable github-auto-commit
     "repo": "auto-commit-repo-2",
     "enabled": true,
     "commit_frequency": "frequent",
-    "custom_schedule": []
+    "custom_schedule": [],
+    "auto_merge": true,
+    "delete_branch_after_merge": true
   },
   {
     "name": "account3",
@@ -294,7 +411,9 @@ sudo systemctl disable github-auto-commit
     "repo": "auto-commit-repo-3",
     "enabled": false,
     "commit_frequency": "custom",
-    "custom_schedule": ["10:30", "14:15", "20:00"]
+    "custom_schedule": ["10:30", "14:15", "20:00"],
+    "auto_merge": false,
+    "delete_branch_after_merge": false
   }
 ]
 ```
@@ -311,6 +430,8 @@ sudo systemctl disable github-auto-commit
 | `enabled` | boolean | ✅ | 是否启用此账号 | `true` / `false` |
 | `commit_frequency` | string | ✅ | 提交频率类型 | `"daily"` / `"frequent"` / `"custom"` |
 | `custom_schedule` | array | ❌ | 自定义提交时间（仅当频率为custom时使用） | `["09:00", "18:00"]` |
+| `auto_merge` | boolean | ❌ | 是否自动合并PR（默认：true） | `true` / `false` |
+| `delete_branch_after_merge` | boolean | ❌ | 合并后是否删除分支（默认：true） | `true` / `false` |
 
 > 💡 **多用户协作提示**：如果需要多个用户同时提交到同一个仓库，请参考 [多用户协作指南](docs/multi-user-guide.md) 了解详细配置方法和最佳实践。
 

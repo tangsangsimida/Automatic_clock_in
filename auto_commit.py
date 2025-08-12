@@ -61,6 +61,7 @@ class GitHubAutoCommit:
         if not account_config:
             raise ValueError("account_config is required")
             
+        self.config = account_config  # 保存完整配置
         self.token = account_config['token']
         self.username = account_config['username']
         self.email = account_config['email']
@@ -336,7 +337,7 @@ class GitHubAutoCommit:
             logger.error(f"创建分支失败: {e}")
             return False
     
-    def create_pull_request(self, branch_name: str, title: str, body: str) -> Optional[str]:
+    def create_pull_request(self, branch_name: str, title: str, body: str) -> Optional[Tuple[str, int]]:
         """创建Pull Request"""
         try:
             data = {
@@ -350,11 +351,209 @@ class GitHubAutoCommit:
             )
             
             if response.status_code == 201:
-                return response.json()['html_url']
+                pr_data = response.json()
+                return pr_data['html_url'], pr_data['number']
             return None
         except Exception as e:
             logger.error(f"创建PR失败: {e}")
             return None
+    
+    def merge_pull_request(self, pr_number: int, commit_title: str = None) -> bool:
+        """合并Pull Request"""
+        try:
+            # 首先检查PR状态
+            pr_response = self._make_request(
+                'GET', f'{self.repo_url}/pulls/{pr_number}'
+            )
+            
+            if pr_response.status_code != 200:
+                logger.error(f"[{self.account_name}] 获取PR状态失败: {pr_response.status_code} - {pr_response.text}")
+                return False
+            
+            pr_data = pr_response.json()
+            pr_state = pr_data.get('state')
+            mergeable = pr_data.get('mergeable')
+            merged = pr_data.get('merged')
+            
+            logger.info(f"[{self.account_name}] PR状态: state={pr_state}, mergeable={mergeable}, merged={merged}")
+            
+            if merged:
+                logger.info(f"[{self.account_name}] PR已经被合并")
+                return True
+            
+            if pr_state != 'open':
+                logger.error(f"[{self.account_name}] PR状态不是open: {pr_state}")
+                return False
+            
+            if mergeable is False:
+                logger.error(f"[{self.account_name}] PR不可合并，可能存在冲突")
+                return False
+            
+            # 检查用户权限
+            repo_response = self._make_request(
+                'GET', f'{self.repo_url}'
+            )
+            if repo_response.status_code == 200:
+                repo_data = repo_response.json()
+                permissions = repo_data.get('permissions', {})
+                can_push = permissions.get('push', False)
+                can_admin = permissions.get('admin', False)
+                logger.info(f"[{self.account_name}] 仓库权限: push={can_push}, admin={can_admin}")
+                
+                if not (can_push or can_admin):
+                    logger.error(f"[{self.account_name}] 用户没有合并PR的权限")
+                    return False
+            else:
+                logger.warning(f"[{self.account_name}] 无法获取仓库权限信息: {repo_response.status_code}")
+            
+            # 检查分支保护规则
+            branch_protection_response = self._make_request(
+                'GET', f'{self.repo_url}/branches/{MAIN_BRANCH}/protection'
+            )
+            if branch_protection_response.status_code == 200:
+                protection_data = branch_protection_response.json()
+                required_reviews = protection_data.get('required_pull_request_reviews', {})
+                min_reviews = required_reviews.get('required_approving_review_count', 0)
+                dismiss_stale = required_reviews.get('dismiss_stale_reviews', False)
+                require_code_owner = required_reviews.get('require_code_owner_reviews', False)
+                
+                logger.info(f"[{self.account_name}] 分支保护: 需要{min_reviews}个审核, dismiss_stale={dismiss_stale}, require_code_owner={require_code_owner}")
+                
+                if min_reviews > 0:
+                    # 检查PR的审核状态
+                    reviews_response = self._make_request(
+                        'GET', f'{self.repo_url}/pulls/{pr_number}/reviews'
+                    )
+                    if reviews_response.status_code == 200:
+                        reviews = reviews_response.json()
+                        approved_count = sum(1 for review in reviews if review.get('state') == 'APPROVED')
+                        logger.info(f"[{self.account_name}] PR已获得{approved_count}个审核批准，需要{min_reviews}个")
+                        
+                        if approved_count < min_reviews:
+                            logger.error(f"[{self.account_name}] PR审核不足，无法合并")
+                            return False
+            elif branch_protection_response.status_code == 404:
+                logger.info(f"[{self.account_name}] 分支无保护规则")
+            else:
+                logger.warning(f"[{self.account_name}] 无法获取分支保护信息: {branch_protection_response.status_code}")
+            
+            # 尝试合并PR
+            data = {
+                'commit_title': commit_title or f'Merge PR #{pr_number}',
+                'merge_method': 'merge'  # 可选: merge, squash, rebase
+            }
+            
+            # 如果用户是仓库所有者且有管理员权限，尝试绕过保护规则
+            if repo_response.status_code == 200:
+                repo_data = repo_response.json()
+                owner_login = repo_data.get('owner', {}).get('login', '')
+                permissions = repo_data.get('permissions', {})
+                is_admin = permissions.get('admin', False)
+                
+                if self.username == owner_login and is_admin:
+                    logger.info(f"[{self.account_name}] 用户是仓库所有者，尝试管理员合并")
+                    # 对于仓库所有者，可以尝试强制合并
+                    data['merge_method'] = 'squash'  # 使用squash合并可能更容易成功
+            
+            # 尝试合并，如果因为分支冲突失败则重试
+            max_retries = 5
+            base_wait_time = 1.0
+            
+            for attempt in range(max_retries):
+                # 在重试前添加随机延迟，避免多个账户同时操作
+                if attempt > 0:
+                    wait_time = base_wait_time * (2 ** attempt) + random.uniform(0.5, 1.5)
+                    logger.info(f"[{self.account_name}] 等待 {wait_time:.1f} 秒后重试...")
+                    time.sleep(wait_time)
+                
+                response = self._make_request(
+                    'PUT', f'{self.repo_url}/pulls/{pr_number}/merge', json=data
+                )
+                
+                if response.status_code == 200:
+                    logger.info(f"[{self.account_name}] PR合并成功")
+                    return True
+                
+                error_msg = response.text
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get('message', error_msg)
+                except:
+                    pass
+                
+                # 检查是否是因为分支被修改导致的冲突
+                if response.status_code == 405 and ("Base branch was modified" in error_msg or "merge conflict" in error_msg.lower()):
+                    logger.warning(f"[{self.account_name}] 检测到分支冲突: {error_msg} (尝试 {attempt + 1}/{max_retries})")
+                    
+                    if attempt < max_retries - 1:  # 不是最后一次尝试
+                        # 重新检查PR状态
+                        pr_response = self._make_request(
+                            'GET', f'{self.repo_url}/pulls/{pr_number}'
+                        )
+                        
+                        if pr_response.status_code == 200:
+                            pr_data = pr_response.json()
+                            if pr_data.get('merged'):
+                                logger.info(f"[{self.account_name}] PR已被其他操作合并")
+                                return True
+                            
+                            # 检查是否仍然可以合并
+                            mergeable = pr_data.get('mergeable')
+                            if mergeable is False:
+                                logger.error(f"[{self.account_name}] PR存在真实冲突，无法自动合并")
+                                return False
+                            elif mergeable is None:
+                                logger.info(f"[{self.account_name}] PR合并状态检查中，继续重试")
+                        
+                        continue  # 重试
+                    else:
+                        logger.error(f"[{self.account_name}] 分支冲突重试次数已用完")
+                        return False
+                
+                # 检查是否是权限问题
+                elif response.status_code == 403:
+                    logger.error(f"[{self.account_name}] 权限不足，无法合并PR: {error_msg}")
+                    return False
+                
+                # 检查是否是PR已经合并
+                elif response.status_code == 405 and "Pull Request is not mergeable" in error_msg:
+                    # 再次检查PR状态
+                    pr_response = self._make_request(
+                        'GET', f'{self.repo_url}/pulls/{pr_number}'
+                    )
+                    if pr_response.status_code == 200:
+                        pr_data = pr_response.json()
+                        if pr_data.get('merged'):
+                            logger.info(f"[{self.account_name}] PR已被合并")
+                            return True
+                    
+                    logger.error(f"[{self.account_name}] PR不可合并: {error_msg}")
+                    return False
+                
+                # 其他类型的错误，记录并返回
+                else:
+                    logger.error(f"[{self.account_name}] PR合并失败: {response.status_code} - {error_msg}")
+                    return False
+            
+            # 所有重试都失败了
+            logger.error(f"[{self.account_name}] PR合并失败，已重试{max_retries}次")
+            return False
+                
+        except Exception as e:
+            logger.error(f"[{self.account_name}] 合并PR异常: {e}")
+            return False
+    
+    def delete_branch(self, branch_name: str) -> bool:
+        """删除分支"""
+        try:
+            response = self._make_request(
+                'DELETE', f'{self.repo_url}/git/refs/heads/{branch_name}'
+            )
+            
+            return response.status_code == 204
+        except Exception as e:
+            logger.error(f"删除分支失败: {e}")
+            return False
     
     def generate_daily_content(self) -> str:
         """生成每日内容"""
@@ -374,7 +573,7 @@ class GitHubAutoCommit:
         activity = random.choice(activities)
         tech = random.choice(technologies)
         
-        content = f"""# 每日提交记录
+        content = f"""# 每日提交记录 - {self.account_name}
 
 ## 📅 {now.strftime('%Y-%m-%d')}
 
@@ -382,6 +581,7 @@ class GitHubAutoCommit:
 - **主要活动**: {activity}
 - **技术栈**: {tech}
 - **提交时间**: {now.strftime('%H:%M:%S')}
+- **账号**: {self.account_name}
 
 ### 📊 统计信息
 - 总提交次数: {random.randint(100, 999)}
@@ -423,7 +623,8 @@ class GitHubAutoCommit:
             # 生成内容
             now = datetime.now()
             content = self.generate_daily_content()
-            file_path = f"daily_commits/{now.strftime('%Y/%m')}/{now.strftime('%Y-%m-%d')}.md"
+            # 将文件放到用户专属文件夹中，避免合并冲突
+            file_path = f"users/{self.account_name}/daily_commits/{now.strftime('%Y/%m')}/{now.strftime('%Y-%m-%d')}.md"
             
             # 创建blob
             blob_sha = self.create_blob(content)
@@ -477,15 +678,45 @@ class GitHubAutoCommit:
                     time=now.strftime('%H:%M:%S')
                 )
                 
-                pr_url = self.create_pull_request(branch_name, pr_title, pr_body)
-                if not pr_url:
+                pr_result = self.create_pull_request(branch_name, pr_title, pr_body)
+                if not pr_result:
                     return False, "创建PR失败"
                 
-                account_logger.info(f"[{self.account_name}] ✅ 自动提交成功！")
+                pr_url, pr_number = pr_result
+                account_logger.info(f"[{self.account_name}] ✅ PR创建成功！")
                 account_logger.info(f"[{self.account_name}] 📁 文件: {file_path}")
                 account_logger.info(f"[{self.account_name}] 🔗 PR链接: {pr_url}")
                 
-                return True, pr_url
+                # 检查是否启用自动合并
+                auto_merge = self.config.get('auto_merge', True)
+                delete_branch_after_merge = self.config.get('delete_branch_after_merge', True)
+                
+                if auto_merge:
+                    # 等待一小段时间确保PR创建完成
+                    time.sleep(2)
+                    
+                    # 自动合并PR
+                    merge_title = f"Auto merge: {pr_title}"
+                    if self.merge_pull_request(pr_number, merge_title):
+                        account_logger.info(f"[{self.account_name}] ✅ PR自动合并成功！")
+                        
+                        # 根据配置决定是否删除分支
+                        if delete_branch_after_merge:
+                            time.sleep(2)
+                            if self.delete_branch(branch_name):
+                                account_logger.info(f"[{self.account_name}] ✅ 分支 {branch_name} 已删除")
+                                return True, f"PR已自动合并并删除分支: {pr_url}"
+                            else:
+                                account_logger.warning(f"[{self.account_name}] ⚠️ 删除分支 {branch_name} 失败")
+                                return True, f"PR已自动合并但删除分支失败: {pr_url}"
+                        else:
+                            return True, f"PR已自动合并: {pr_url}"
+                    else:
+                        account_logger.error(f"[{self.account_name}] ❌ PR自动合并失败")
+                        return False, f"PR创建成功但合并失败: {pr_url}"
+                else:
+                    account_logger.info(f"[{self.account_name}] ✅ PR创建成功，等待手动合并")
+                    return True, f"PR创建成功，等待手动合并: {pr_url}"
             
         except Exception as e:
             account_logger.error(f"[{self.account_name}] 自动提交异常: {e}")
@@ -495,12 +726,19 @@ def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple
     """多账号并发提交"""
     results = {}
     
-    def commit_for_account(account_config):
+    def commit_for_account(account_config, delay=0):
+        # 添加随机延迟避免竞争条件
+        if delay > 0:
+            time.sleep(delay)
         auto_commit = GitHubAutoCommit(account_config)
         return account_config['name'], auto_commit.auto_commit_and_pr()
     
     with ThreadPoolExecutor(max_workers=min(len(accounts), 5)) as executor:
-        future_to_account = {executor.submit(commit_for_account, account): account for account in accounts}
+        # 为每个账户分配不同的延迟时间
+        future_to_account = {}
+        for i, account in enumerate(accounts):
+            delay = i * 0.5  # 每个账户延迟0.5秒
+            future_to_account[executor.submit(commit_for_account, account, delay)] = account
         
         for future in as_completed(future_to_account):
             account_name, result = future.result()

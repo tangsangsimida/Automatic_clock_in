@@ -8,7 +8,9 @@
     "enabled": true,
     "commit_frequency": "daily",
     "custom_schedule": [],
-    "description": "主账号 - 每天提交一次"
+    "auto_merge": true,
+    "delete_branch_after_merge": true,
+    "description": "主账号 - 每天提交一次，自动合并PR"
   },
   {
     "name": "account2",
@@ -19,7 +21,9 @@
     "enabled": false,
     "commit_frequency": "frequent",
     "custom_schedule": [],
-    "description": "副账号 - 频繁提交保持活跃 (默认禁用)"
+    "auto_merge": true,
+    "delete_branch_after_merge": true,
+    "description": "副账号 - 频繁提交保持活跃，自动合并PR (默认禁用)"
   },
   {
     "name": "account3",
@@ -30,7 +34,9 @@
     "enabled": false,
     "commit_frequency": "custom",
     "custom_schedule": ["10:30", "14:15", "20:00"],
-    "description": "测试账号 - 自定义时间提交 (已禁用)"
+    "auto_merge": false,
+    "delete_branch_after_merge": false,
+    "description": "测试账号 - 自定义时间提交，手动合并PR (已禁用)"
   },
   {
     "name": "work_account",
@@ -41,7 +47,9 @@
     "enabled": false,
     "commit_frequency": "hourly",
     "custom_schedule": [],
-    "description": "工作账号 - 工作时间每小时提交 (默认禁用)"
+    "auto_merge": true,
+    "delete_branch_after_merge": true,
+    "description": "工作账号 - 工作时间每小时提交，自动合并PR (默认禁用)"
   },
   {
     "name": "minimal_account",
@@ -52,6 +60,8 @@
     "enabled": false,
     "commit_frequency": "minimal",
     "custom_schedule": [],
-    "description": "最少提交账号 - 每天中午提交一次 (默认禁用)"
+    "auto_merge": true,
+    "delete_branch_after_merge": true,
+    "description": "最少提交账号 - 每天中午提交一次，自动合并PR (默认禁用)"
   }
 ]
