@@ -106,6 +106,9 @@ sudo systemctl enable github-auto-commit
 
 ## 📖 使用说明
 
+### 🔗 专题指南
+- [多Token同时提交到一个仓库指南](docs/multi-user-guide.md) - 详细说明如何使用多个Token以同一身份提交
+
 ### 命令行选项
 
 ```bash
@@ -309,6 +312,8 @@ sudo systemctl disable github-auto-commit
 | `commit_frequency` | string | ✅ | 提交频率类型 | `"daily"` / `"frequent"` / `"custom"` |
 | `custom_schedule` | array | ❌ | 自定义提交时间（仅当频率为custom时使用） | `["09:00", "18:00"]` |
 
+> 💡 **多Token提示**：如果需要使用多个Token同时提交到同一个仓库，请参考 [多Token提交指南](docs/multi-user-guide.md) 了解详细配置方法和最佳实践。
+
 #### ⚠️ 重要提醒：username字段说明
 
 **`username` 字段必须填写您的真实GitHub用户名，而不是显示名称或其他标识！**
@@ -378,6 +383,8 @@ Automatic_clock_in/
 ├── data/
 │   └── accounts_config.json # 多账号配置文件
 ├── accounts_config.example.json  # 多账号配置模板
+├── docs/
+│   └── multi-user-guide.md # 多Token提交指南
 ├── .gitignore              # Git忽略文件
 ├── data/                   # 数据目录
 │   ├── accounts_config.json         # 多账号配置
