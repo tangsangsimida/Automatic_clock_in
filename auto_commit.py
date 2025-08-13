@@ -1027,20 +1027,16 @@ class GitHubAutoCommit:
             return False, str(e)
 
 def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple[bool, str]]:
-    """多账号并发提交 - 优化版本，减少竞态条件"""
+    """多账号串行提交 - 确保每个账号依次提交并合并，避免冲突"""
     results = {}
     
-    def commit_for_account(account_config, delay=0):
+    def commit_for_account(account_config):
         """为单个账户执行提交，带重试机制"""
         account_name = account_config['name']
         max_retries = CONCURRENCY_CONFIG['max_retries_per_account']
         conflict_keywords = CONCURRENCY_CONFIG['conflict_detection_keywords']
         retry_delay_range = CONCURRENCY_CONFIG['retry_delay_range']
         enable_smart_retry = CONCURRENCY_CONFIG['enable_smart_retry']
-        
-        # 添加随机延迟避免竞争条件
-        if delay > 0:
-            time.sleep(delay)
         
         for attempt in range(max_retries):
             try:
@@ -1049,7 +1045,7 @@ def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple
                 
                 # 如果成功，直接返回
                 if success:
-                    return account_name, (success, result)
+                    return success, result
                 
                 # 智能冲突检测
                 is_conflict = False
@@ -1061,7 +1057,7 @@ def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple
                 
                 # 如果不是冲突类型的失败，直接返回
                 if not is_conflict:
-                    return account_name, (success, result)
+                    return success, result
                 
                 # 如果是合并冲突，等待一段时间后重试
                 if attempt < max_retries - 1:
@@ -1070,32 +1066,43 @@ def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple
                     time.sleep(wait_time)
                 else:
                     logger.error(f"[{account_name}] 重试次数已用完，最终失败: {result}")
-                    return account_name, (success, result)
+                    return success, result
                     
             except Exception as e:
                 logger.error(f"[{account_name}] 提交过程异常 (尝试 {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     time.sleep(random.uniform(2, 5))
                 else:
-                    return account_name, (False, f"提交异常: {str(e)}")
+                    return False, f"提交异常: {str(e)}"
         
-        return account_name, (False, "未知错误")
+        return False, "未知错误"
     
-    # 使用配置文件中的并发数设置
-    max_workers = min(len(accounts), CONCURRENCY_CONFIG['max_workers'])
-    base_delay_range = CONCURRENCY_CONFIG['base_delay_range']
+    # 串行执行每个账号的提交
+    serial_delay = CONCURRENCY_CONFIG['serial_execution_delay']
+    serial_increment = CONCURRENCY_CONFIG['serial_execution_increment']
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 为每个账户分配延迟时间，减少冲突概率
-        future_to_account = {}
-        for i, account in enumerate(accounts):
-            delay = i * random.uniform(*base_delay_range)  # 使用配置的延迟范围
-            future_to_account[executor.submit(commit_for_account, account, delay)] = account
+    logger.info(f"开始串行处理 {len(accounts)} 个账号，确保依次提交并合并")
+    
+    for i, account in enumerate(accounts):
+        account_name = account['name']
+        logger.info(f"[{i+1}/{len(accounts)}] 开始处理账号: {account_name}")
         
-        for future in as_completed(future_to_account):
-            account_name, result = future.result()
-            results[account_name] = result
+        # 执行提交和合并
+        success, result = commit_for_account(account)
+        results[account_name] = (success, result)
+        
+        if success:
+            logger.info(f"[{account_name}] 提交并合并成功: {result}")
+        else:
+            logger.error(f"[{account_name}] 提交失败: {result}")
+        
+        # 如果不是最后一个账号，添加延迟
+        if i < len(accounts) - 1:
+            delay_time = serial_delay + (i * serial_increment)
+            logger.info(f"等待 {delay_time} 秒后处理下一个账号...")
+            time.sleep(delay_time)
     
+    logger.info(f"所有账号处理完成，成功: {sum(1 for success, _ in results.values() if success)}/{len(accounts)}")
     return results
 
 def main():
