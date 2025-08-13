@@ -43,6 +43,21 @@ COMMIT_FREQUENCY_OPTIONS = {
     "custom": []  # 自定义，需要在配置中指定
 }
 
+# 并发控制配置
+CONCURRENCY_CONFIG = {
+    "max_workers": 3,  # 最大并发数，建议不超过3以减少GitHub API冲突
+    "base_delay_range": (1.5, 3.0),  # 基础延迟范围（秒）
+    "retry_delay_range": (3.0, 8.0),  # 重试延迟范围（秒）
+    "max_retries_per_account": 3,  # 每个账号的最大重试次数
+    "merge_retry_count": 8,  # PR合并的最大重试次数
+    "merge_retry_backoff": 1.5,  # PR合并重试的退避系数
+    "enable_smart_retry": True,  # 启用智能重试（检测冲突类型）
+    "conflict_detection_keywords": [  # 冲突检测关键词
+        "合并失败", "conflict", "not mergeable", "Base branch was modified",
+        "merge conflict", "Pull Request is not mergeable"
+    ]
+}
+
 # 提交配置
 COMMIT_MESSAGE_TEMPLATE = "Auto commit on {date} - Keep the streak alive! 🔥"
 PR_TITLE_TEMPLATE = "Auto PR on {date} - Daily contribution"
@@ -78,6 +93,7 @@ PR_BRANCH_PREFIX = 'auto-commit-'
 GITHUB_API_BASE = 'https://api.github.com'
 REQUEST_TIMEOUT = 30
 MAX_RETRIES = 3
+
 
 # 多账号管理函数
 def load_accounts_config() -> List[Dict[str, Any]]:
@@ -229,6 +245,13 @@ def create_accounts_config_template(file_path: str = None) -> str:
         json.dump(template, f, indent=2, ensure_ascii=False)
     
     return file_path
+
+# 初始化ACCOUNTS变量（向后兼容）
+try:
+    ACCOUNTS = load_accounts_config()
+except Exception:
+    # 如果加载失败，使用空列表，避免导入错误
+    ACCOUNTS = []
 
 if __name__ == '__main__':
     try:

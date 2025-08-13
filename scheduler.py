@@ -17,6 +17,7 @@ import os
 
 from auto_commit import GitHubAutoCommit, run_multi_account_commits
 from config import (
+    COMMIT_FREQUENCY_OPTIONS, CONCURRENCY_CONFIG,
     LOG_FILE, validate_config,
     load_accounts_config, list_enabled_accounts,
     GITHUB_ACCOUNTS_CONFIG
@@ -147,6 +148,12 @@ class AutoCommitScheduler:
                 return
             
             logger.info(f"当前时间 {current_time}，需要执行 {len(accounts_to_run)} 个账号的提交任务")
+            
+            # 记录并发控制配置信息
+            if len(accounts_to_run) > 1:
+                logger.info(f"🔧 并发控制配置: 最大并发数={CONCURRENCY_CONFIG['max_workers']}, "
+                           f"基础延迟={CONCURRENCY_CONFIG['base_delay_range']}, "
+                           f"重试次数={CONCURRENCY_CONFIG['max_retries_per_account']}")
             
             # 执行多账号提交
             results = run_multi_account_commits(accounts_to_run)

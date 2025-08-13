@@ -22,7 +22,7 @@ from config import (
     COMMIT_MESSAGE_TEMPLATE, PR_TITLE_TEMPLATE, PR_BODY_TEMPLATE,
     DATA_DIR, LOG_FILE, MAIN_BRANCH, PR_BRANCH_PREFIX,
     GITHUB_API_BASE, REQUEST_TIMEOUT, MAX_RETRIES,
-    validate_config
+    CONCURRENCY_CONFIG, validate_config
 )
 
 # 配置日志
@@ -261,6 +261,27 @@ class GitHubAutoCommit:
             logger.error(f"创建tree失败: {e}")
             return None
     
+    def get_recent_commits(self, limit: int = 5) -> List[Dict]:
+        """获取最近的提交历史"""
+        try:
+            url = f'{self.repo_url}/commits'
+            params = {
+                'sha': MAIN_BRANCH,
+                'per_page': limit
+            }
+            response = self._make_request('GET', url, params=params)
+            
+            if response.status_code == 200:
+                commits = response.json()
+                logger.info(f"[{self.account_name}] 获取到 {len(commits)} 个最近提交")
+                return commits
+            else:
+                logger.warning(f"[{self.account_name}] 获取最近提交失败: {response.status_code}")
+                return []
+        except Exception as e:
+            logger.error(f"[{self.account_name}] 获取最近提交异常: {e}")
+            return []
+    
     def create_commit(self, tree_sha: str, parent_sha: Optional[str], message: str) -> Optional[str]:
         """创建提交"""
         try:
@@ -332,9 +353,26 @@ class GitHubAutoCommit:
             response = self._make_request(
                 'POST', f'{self.repo_url}/git/refs', json=data
             )
-            return response.status_code == 201
+            
+            if response.status_code == 201:
+                logger.info(f"[{self.account_name}] ✅ 分支 {branch_name} 创建成功")
+                return True
+            elif response.status_code == 422:
+                # 分支已存在或其他冲突
+                error_msg = response.text
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get('message', error_msg)
+                except:
+                    pass
+                logger.error(f"[{self.account_name}] 创建分支失败: {error_msg}")
+                return False
+            else:
+                logger.error(f"[{self.account_name}] 创建分支失败: HTTP {response.status_code} - {response.text}")
+                return False
+                
         except Exception as e:
-            logger.error(f"创建分支失败: {e}")
+            logger.error(f"[{self.account_name}] 创建分支异常: {e}")
             return False
     
     def create_pull_request(self, branch_name: str, title: str, body: str) -> Optional[Tuple[str, int]]:
@@ -455,16 +493,36 @@ class GitHubAutoCommit:
                     # 对于仓库所有者，可以尝试强制合并
                     data['merge_method'] = 'squash'  # 使用squash合并可能更容易成功
             
-            # 尝试合并，如果因为分支冲突失败则重试
-            max_retries = 5
+            # 从配置获取重试参数
+            max_retries = CONCURRENCY_CONFIG['merge_retry_count']
+            backoff_factor = CONCURRENCY_CONFIG['merge_retry_backoff']
             base_wait_time = 1.0
             
             for attempt in range(max_retries):
                 # 在重试前添加随机延迟，避免多个账户同时操作
                 if attempt > 0:
-                    wait_time = base_wait_time * (2 ** attempt) + random.uniform(0.5, 1.5)
+                    wait_time = base_wait_time * (backoff_factor ** attempt) + random.uniform(1.0, 3.0)  # 使用配置的退避系数
                     logger.info(f"[{self.account_name}] 等待 {wait_time:.1f} 秒后重试...")
                     time.sleep(wait_time)
+                    
+                    # 在重试前重新检查PR状态
+                    pr_check_response = self._make_request(
+                        'GET', f'{self.repo_url}/pulls/{pr_number}'
+                    )
+                    if pr_check_response.status_code == 200:
+                        pr_check_data = pr_check_response.json()
+                        if pr_check_data.get('merged'):
+                            logger.info(f"[{self.account_name}] PR在重试期间已被合并")
+                            return True
+                        
+                        # 检查mergeable状态是否已更新
+                        mergeable_state = pr_check_data.get('mergeable')
+                        mergeable_state_status = pr_check_data.get('mergeable_state')
+                        logger.info(f"[{self.account_name}] PR状态更新: mergeable={mergeable_state}, mergeable_state={mergeable_state_status}")
+                        
+                        if mergeable_state is False:
+                            logger.error(f"[{self.account_name}] PR确认不可合并，停止重试")
+                            return False
                 
                 response = self._make_request(
                     'PUT', f'{self.repo_url}/pulls/{pr_number}/merge', json=data
@@ -543,6 +601,47 @@ class GitHubAutoCommit:
             logger.error(f"[{self.account_name}] 合并PR异常: {e}")
             return False
     
+    def create_branch_with_conflict_detection(self, branch_name: str, commit_sha: str) -> tuple:
+        """创建分支，带冲突检测和重试机制"""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                # 在创建分支前，再次确认commit SHA是否基于最新的main分支
+                latest_main_sha = self.get_latest_commit_sha()
+                if latest_main_sha:
+                    # 检查我们的commit是否基于最新的main分支
+                    response = self._make_request('GET', f'{self.repo_url}/git/commits/{commit_sha}')
+                    if response.status_code == 200:
+                        commit_data = response.json()
+                        parents = commit_data.get('parents', [])
+                        if parents and parents[0]['sha'] != latest_main_sha:
+                            logger.warning(f"[{self.account_name}] 检测到main分支在创建分支期间已更新，需要重新创建commit")
+                            # 这里可以选择重新创建commit或者继续使用当前commit
+                            # 为了简化，我们继续使用当前commit，因为文件路径是用户专属的，不会冲突
+                
+                # 尝试创建分支
+                if self.create_branch(branch_name, commit_sha):
+                    return True, "分支创建成功"
+                
+                # 如果失败，等待一段时间后重试
+                if attempt < max_retries - 1:
+                    wait_time = random.uniform(1.0, 3.0) + attempt * 0.5
+                    logger.info(f"[{self.account_name}] 创建分支失败，等待 {wait_time:.1f} 秒后重试 (尝试 {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    
+                    # 生成新的分支名避免冲突
+                    now = datetime.now()
+                    microsecond_suffix = f"{now.microsecond:06d}"
+                    random_suffix = random.randint(1000, 9999)
+                    branch_name = f"{PR_BRANCH_PREFIX}{self.account_name}-{now.strftime('%Y%m%d-%H%M%S')}-{microsecond_suffix[:3]}-{random_suffix}"
+                    
+            except Exception as e:
+                logger.error(f"[{self.account_name}] 创建分支异常 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(random.uniform(1.0, 2.0))
+        
+        return False, "创建分支失败，重试次数已用完"
+    
     def delete_branch(self, branch_name: str) -> bool:
         """删除分支"""
         try:
@@ -613,12 +712,22 @@ class GitHubAutoCommit:
                     return False, "创建仓库失败"
                 time.sleep(5)  # 等待仓库创建完成
             
-            # 获取最新提交
-            latest_sha = self.get_latest_commit_sha()
+            # 获取最新提交 - 增加重试机制处理并发更新
+            latest_sha = None
+            for retry in range(3):
+                latest_sha = self.get_latest_commit_sha()
+                if latest_sha is not None:
+                    break
+                if retry < 2:
+                    time.sleep(random.uniform(0.5, 1.5))
+                    account_logger.info(f"[{self.account_name}] 重试获取最新提交 SHA (尝试 {retry + 2}/3)")
+            
             is_empty_repo = latest_sha is None
             
             if is_empty_repo:
                 account_logger.info(f"[{self.account_name}] 检测到空仓库，将创建初始提交")
+            else:
+                account_logger.info(f"[{self.account_name}] 基于提交 {latest_sha[:8]} 创建新分支")
             
             # 生成内容
             now = datetime.now()
@@ -667,9 +776,45 @@ class GitHubAutoCommit:
                 return True, "初始提交完成"
             else:
                 # 非空仓库：创建分支和PR
-                branch_name = f"{PR_BRANCH_PREFIX}{self.account_name}-{now.strftime('%Y%m%d-%H%M%S')}"
-                if not self.create_branch(branch_name, commit_sha):
-                    return False, "创建分支失败"
+                # 添加微秒级时间戳和随机数，确保分支名唯一性
+                microsecond_suffix = f"{now.microsecond:06d}"
+                random_suffix = random.randint(1000, 9999)
+                branch_name = f"{PR_BRANCH_PREFIX}{self.account_name}-{now.strftime('%Y%m%d-%H%M%S')}-{microsecond_suffix[:3]}-{random_suffix}"
+                
+                # 在创建分支前再次获取最新的main分支SHA，确保基于最新状态
+                current_main_sha = self.get_latest_commit_sha()
+                if current_main_sha and current_main_sha != latest_sha:
+                    account_logger.info(f"[{self.account_name}] 检测到main分支已更新: {latest_sha[:8]} -> {current_main_sha[:8]}")
+                    
+                    # 检查最近是否有频繁的提交活动
+                    recent_commits = self.get_recent_commits(limit=5)
+                    if recent_commits and len(recent_commits) >= 3:
+                        # 如果最近有3个或更多提交，增加额外延迟
+                        extra_delay = random.uniform(2.0, 5.0)
+                        account_logger.info(f"[{self.account_name}] 检测到频繁提交活动，增加 {extra_delay:.1f} 秒延迟")
+                        time.sleep(extra_delay)
+                    
+                    # 需要基于新的main分支重新创建tree和commit
+                    response = self._make_request('GET', f'{self.repo_url}/git/commits/{current_main_sha}')
+                    if response.status_code == 200:
+                        new_base_tree_sha = response.json()['tree']['sha']
+                        new_tree_sha = self.create_tree(new_base_tree_sha, file_path, blob_sha)
+                        if new_tree_sha:
+                            new_commit_sha = self.create_commit(new_tree_sha, current_main_sha, commit_message)
+                            if new_commit_sha:
+                                commit_sha = new_commit_sha
+                                account_logger.info(f"[{self.account_name}] 已基于最新main分支重新创建提交: {commit_sha[:8]}")
+                            else:
+                                account_logger.warning(f"[{self.account_name}] 重新创建提交失败，使用原提交")
+                        else:
+                            account_logger.warning(f"[{self.account_name}] 重新创建tree失败，使用原提交")
+                    else:
+                        account_logger.warning(f"[{self.account_name}] 获取新main分支信息失败，使用原提交")
+                
+                # 创建分支（带冲突检测）
+                branch_success, branch_message = self.create_branch_with_conflict_detection(branch_name, commit_sha)
+                if not branch_success:
+                    return False, f"创建分支失败: {branch_message}"
                 
                 # 创建PR
                 pr_title = PR_TITLE_TEMPLATE.format(date=now.strftime('%Y-%m-%d'))
@@ -723,21 +868,69 @@ class GitHubAutoCommit:
             return False, str(e)
 
 def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple[bool, str]]:
-    """多账号并发提交"""
+    """多账号并发提交 - 优化版本，减少竞态条件"""
     results = {}
     
     def commit_for_account(account_config, delay=0):
+        """为单个账户执行提交，带重试机制"""
+        account_name = account_config['name']
+        max_retries = CONCURRENCY_CONFIG['max_retries_per_account']
+        conflict_keywords = CONCURRENCY_CONFIG['conflict_detection_keywords']
+        retry_delay_range = CONCURRENCY_CONFIG['retry_delay_range']
+        enable_smart_retry = CONCURRENCY_CONFIG['enable_smart_retry']
+        
         # 添加随机延迟避免竞争条件
         if delay > 0:
             time.sleep(delay)
-        auto_commit = GitHubAutoCommit(account_config)
-        return account_config['name'], auto_commit.auto_commit_and_pr()
+        
+        for attempt in range(max_retries):
+            try:
+                auto_commit = GitHubAutoCommit(account_config)
+                success, result = auto_commit.auto_commit_and_pr()
+                
+                # 如果成功，直接返回
+                if success:
+                    return account_name, (success, result)
+                
+                # 智能冲突检测
+                is_conflict = False
+                if enable_smart_retry:
+                    for keyword in conflict_keywords:
+                        if keyword in result:
+                            is_conflict = True
+                            break
+                
+                # 如果不是冲突类型的失败，直接返回
+                if not is_conflict:
+                    return account_name, (success, result)
+                
+                # 如果是合并冲突，等待一段时间后重试
+                if attempt < max_retries - 1:
+                    wait_time = random.uniform(*retry_delay_range) + attempt * 2  # 递增等待时间
+                    logger.warning(f"[{account_name}] 检测到冲突，等待 {wait_time:.1f} 秒后重试 (尝试 {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"[{account_name}] 重试次数已用完，最终失败: {result}")
+                    return account_name, (success, result)
+                    
+            except Exception as e:
+                logger.error(f"[{account_name}] 提交过程异常 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(random.uniform(2, 5))
+                else:
+                    return account_name, (False, f"提交异常: {str(e)}")
+        
+        return account_name, (False, "未知错误")
     
-    with ThreadPoolExecutor(max_workers=min(len(accounts), 5)) as executor:
-        # 为每个账户分配不同的延迟时间
+    # 使用配置文件中的并发数设置
+    max_workers = min(len(accounts), CONCURRENCY_CONFIG['max_workers'])
+    base_delay_range = CONCURRENCY_CONFIG['base_delay_range']
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 为每个账户分配延迟时间，减少冲突概率
         future_to_account = {}
         for i, account in enumerate(accounts):
-            delay = i * 0.5  # 每个账户延迟0.5秒
+            delay = i * random.uniform(*base_delay_range)  # 使用配置的延迟范围
             future_to_account[executor.submit(commit_for_account, account, delay)] = account
         
         for future in as_completed(future_to_account):
@@ -759,11 +952,34 @@ def main():
             logger.info(f"检测到 {len(GITHUB_ACCOUNTS)} 个账号，开始并发提交")
             results = run_multi_account_commits(GITHUB_ACCOUNTS)
             
+            # 统计结果
+            success_count = 0
+            total_count = len(results)
+            
             for account_name, (success, result) in results.items():
                 if success:
-                    logger.info(f"🎉 [{account_name}] 任务完成！PR链接: {result}")
+                    success_count += 1
+                    logger.info(f"✅ [{account_name}] 提交成功: {result}")
                 else:
-                    logger.error(f"❌ [{account_name}] 任务失败: {result}")
+                    logger.error(f"❌ [{account_name}] 提交失败: {result}")
+            
+            # 输出总结
+            logger.info(f"定时提交任务完成: {success_count}/{total_count} 成功")
+            
+            # 详细结果输出
+            for account_name, (success, result) in results.items():
+                if success:
+                    if "PR已自动合并" in result:
+                        logger.info(f"✅ [{account_name}] 提交成功: PR已自动合并并删除分支: `{result.split(': ')[-1]}`")
+                    elif "初始提交" in result:
+                        logger.info(f"✅ [{account_name}] 提交成功: 仓库初始化完成")
+                    else:
+                        logger.info(f"✅ [{account_name}] 提交成功: {result}")
+                else:
+                    if "合并失败" in result:
+                        logger.error(f"❌ [{account_name}] 提交失败: PR创建成功但合并失败: `{result.split(': ')[-1] if ': ' in result else result}`")
+                    else:
+                        logger.error(f"❌ [{account_name}] 提交失败: {result}")
         else:
             # 单账号模式
             auto_commit = GitHubAutoCommit()

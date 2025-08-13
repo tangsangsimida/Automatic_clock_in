@@ -97,7 +97,7 @@ setup_venv() {
     pip install --upgrade pip
     
     # 安装Python依赖
-    pip install requests schedule
+    pip install -r requirements.txt
     
     log_success "Python虚拟环境创建完成"
 }
