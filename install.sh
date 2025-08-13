@@ -320,6 +320,329 @@ source venv/bin/activate
 python scheduler.py --run-once
 EOF
 
+    # 创建重启脚本
+    cat > "$SCRIPT_DIR/restart.sh" << 'EOF'
+#!/bin/bash
+
+# GitHub自动提交系统重启脚本
+# 提供一键重启、启动、停止、重载配置、查看状态等功能
+
+SERVICE_NAME="github-auto-commit"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PID_FILE="/tmp/github-auto-commit.pid"
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# 日志函数
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 显示帮助信息
+show_help() {
+    echo "GitHub自动提交系统重启脚本"
+    echo "============================"
+    echo ""
+    echo "用法: $0 [选项]"
+    echo ""
+    echo "选项:"
+    echo "  restart    重启服务（默认）"
+    echo "  start      启动服务"
+    echo "  stop       停止服务"
+    echo "  reload     重载配置"
+    echo "  status     查看状态"
+    echo "  help       显示帮助信息"
+    echo ""
+    echo "示例:"
+    echo "  $0          # 重启服务"
+    echo "  $0 start    # 启动服务"
+    echo "  $0 stop     # 停止服务"
+    echo "  $0 reload   # 重载配置"
+    echo "  $0 status   # 查看状态"
+}
+
+# 检查systemd服务状态
+check_systemd_service() {
+    if systemctl is-active --quiet $SERVICE_NAME 2>/dev/null; then
+        return 0  # 服务正在运行
+    else
+        return 1  # 服务未运行
+    fi
+}
+
+# 检查直接运行的进程
+check_direct_process() {
+    if [ -f "$PID_FILE" ]; then
+        PID=$(cat $PID_FILE)
+        if kill -0 $PID 2>/dev/null; then
+            return 0  # 进程正在运行
+        else
+            rm -f $PID_FILE  # 清理无效PID文件
+            return 1  # 进程未运行
+        fi
+    else
+        return 1  # PID文件不存在
+    fi
+}
+
+# 停止服务
+stop_service() {
+    log_info "正在停止GitHub自动提交服务..."
+    
+    local stopped=false
+    
+    # 停止systemd服务
+    if systemctl is-enabled --quiet $SERVICE_NAME 2>/dev/null; then
+        if check_systemd_service; then
+            log_info "停止systemd服务..."
+            if sudo systemctl stop $SERVICE_NAME; then
+                log_success "systemd服务已停止"
+                stopped=true
+            else
+                log_error "停止systemd服务失败"
+            fi
+        fi
+    fi
+    
+    # 停止直接运行的进程
+    if check_direct_process; then
+        PID=$(cat $PID_FILE)
+        log_info "停止直接运行的进程 (PID: $PID)..."
+        
+        # 尝试优雅停止
+        if kill -TERM $PID 2>/dev/null; then
+            # 等待进程结束
+            for i in {1..10}; do
+                if ! kill -0 $PID 2>/dev/null; then
+                    break
+                fi
+                sleep 1
+            done
+            
+            # 如果进程仍在运行，强制停止
+            if kill -0 $PID 2>/dev/null; then
+                log_warning "优雅停止失败，强制停止进程..."
+                kill -KILL $PID 2>/dev/null
+            fi
+            
+            log_success "直接运行的进程已停止"
+            stopped=true
+        fi
+        
+        # 清理PID文件
+        rm -f $PID_FILE
+    fi
+    
+    # 查找并停止其他相关进程
+    local pids=$(pgrep -f "python.*scheduler.py" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        log_info "发现其他相关进程，正在停止..."
+        echo $pids | xargs kill -TERM 2>/dev/null || true
+        sleep 2
+        echo $pids | xargs kill -KILL 2>/dev/null || true
+        log_success "其他相关进程已停止"
+        stopped=true
+    fi
+    
+    if [ "$stopped" = true ]; then
+        log_success "所有服务已停止"
+    else
+        log_info "没有发现正在运行的服务"
+    fi
+}
+
+# 启动服务
+start_service() {
+    log_info "正在启动GitHub自动提交服务..."
+    
+    # 检查是否已经在运行
+    if check_systemd_service; then
+        log_warning "systemd服务已在运行"
+        return 0
+    fi
+    
+    if check_direct_process; then
+        log_warning "直接运行的进程已在运行"
+        return 0
+    fi
+    
+    # 尝试启动systemd服务
+    if systemctl is-enabled --quiet $SERVICE_NAME 2>/dev/null; then
+        log_info "启动systemd服务..."
+        if sudo systemctl start $SERVICE_NAME; then
+            sleep 2
+            if check_systemd_service; then
+                log_success "systemd服务启动成功"
+                return 0
+            else
+                log_error "systemd服务启动失败"
+            fi
+        else
+            log_error "无法启动systemd服务"
+        fi
+    else
+        log_warning "systemd服务未配置，请运行 ./install.sh 进行配置"
+    fi
+    
+    return 1
+}
+
+# 重载配置
+reload_config() {
+    log_info "正在重载配置..."
+    
+    # 检查配置文件
+    if [ ! -f "$SCRIPT_DIR/data/accounts_config.json" ]; then
+        log_error "配置文件不存在: $SCRIPT_DIR/data/accounts_config.json"
+        return 1
+    fi
+    
+    # 验证配置文件
+    cd "$SCRIPT_DIR"
+    if [ -d "venv" ]; then
+        source venv/bin/activate
+        if python -c "from config import validate_config; validate_config()" 2>/dev/null; then
+            log_success "配置文件验证通过"
+        else
+            log_error "配置文件验证失败，请检查配置"
+            return 1
+        fi
+    fi
+    
+    # 重载systemd服务
+    if systemctl is-enabled --quiet $SERVICE_NAME 2>/dev/null; then
+        if check_systemd_service; then
+            log_info "重载systemd服务配置..."
+            sudo systemctl reload-or-restart $SERVICE_NAME
+            sleep 2
+            if check_systemd_service; then
+                log_success "systemd服务配置重载成功"
+            else
+                log_error "systemd服务重载失败"
+                return 1
+            fi
+        else
+            log_info "systemd服务未运行，启动服务..."
+            start_service
+        fi
+    else
+        log_warning "systemd服务未配置，无法重载"
+        return 1
+    fi
+    
+    log_success "配置重载完成"
+}
+
+# 查看状态
+show_status() {
+    echo "GitHub自动提交系统状态"
+    echo "======================"
+    echo ""
+    
+    # systemd服务状态
+    if systemctl is-enabled --quiet $SERVICE_NAME 2>/dev/null; then
+        echo "📊 systemd服务状态:"
+        sudo systemctl status $SERVICE_NAME --no-pager -l || true
+        echo ""
+        
+        echo "📋 最近日志 (最新10条):"
+        sudo journalctl -u $SERVICE_NAME -n 10 --no-pager || true
+    else
+        echo "⚠️  systemd服务未配置"
+    fi
+    
+    echo ""
+    
+    # 直接运行进程状态
+    if check_direct_process; then
+        PID=$(cat $PID_FILE)
+        echo "🔄 直接运行进程: PID $PID (运行中)"
+    else
+        echo "🔄 直接运行进程: 未运行"
+    fi
+    
+    # 其他相关进程
+    local pids=$(pgrep -f "python.*scheduler.py" 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        echo "🔍 发现其他相关进程: $pids"
+    fi
+    
+    echo ""
+    echo "💡 管理命令:"
+    echo "  重启服务: $0 restart"
+    echo "  启动服务: $0 start"
+    echo "  停止服务: $0 stop"
+    echo "  重载配置: $0 reload"
+    echo "  查看状态: $0 status"
+}
+
+# 重启服务
+restart_service() {
+    log_info "正在重启GitHub自动提交服务..."
+    
+    stop_service
+    sleep 2
+    
+    if start_service; then
+        log_success "服务重启成功"
+        echo ""
+        show_status
+    else
+        log_error "服务重启失败"
+        return 1
+    fi
+}
+
+# 主函数
+main() {
+    case "${1:-restart}" in
+        restart)
+            restart_service
+            ;;
+        start)
+            start_service
+            ;;
+        stop)
+            stop_service
+            ;;
+        reload)
+            reload_config
+            ;;
+        status)
+            show_status
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        *)
+            log_error "未知选项: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# 运行主函数
+main "$@"
+EOF
+
     # 创建直接启动脚本（备用方案）
     cat > "$SCRIPT_DIR/start_direct.sh" << 'EOF'
 #!/bin/bash
@@ -470,6 +793,12 @@ EOF
     # 设置执行权限
     chmod +x "$SCRIPT_DIR"/*.sh
     
+    # 确保restart.sh有执行权限
+    if [[ -f "$SCRIPT_DIR/restart.sh" ]]; then
+        chmod +x "$SCRIPT_DIR/restart.sh"
+        log_info "restart.sh 脚本权限已设置"
+    fi
+    
     log_success "管理脚本创建完成"
 }
 
@@ -565,7 +894,8 @@ main() {
     log_info "4. 查看状态: ./status.sh"
     echo
     log_info "管理命令:"
-    log_info "  启动服务: ./start.sh (推荐) 或 sudo systemctl start github-auto-commit"
+    log_info "  重启服务: ./restart.sh (推荐，一键重启)"
+    log_info "  启动服务: ./start.sh 或 sudo systemctl start github-auto-commit"
     log_info "  停止服务: ./stop.sh 或 sudo systemctl stop github-auto-commit"
     log_info "  直接启动: ./start_direct.sh (备用方案，当systemd有问题时使用)"
     log_info "  重载配置: ./reload_config.sh (无需重启服务)"
