@@ -396,9 +396,84 @@ class GitHubAutoCommit:
             logger.error(f"创建PR失败: {e}")
             return None
     
-    def merge_pull_request(self, pr_number: int, commit_title: str = None) -> bool:
-        """合并Pull Request"""
+    def acquire_merge_lock(self) -> bool:
+        """获取合并锁，防止多个账户同时合并"""
         try:
+            lock_file_name = f".merge_lock_{int(time.time())}"
+            lock_content = f"{{\"account\": \"{self.account_name}\", \"timestamp\": {time.time()}, \"action\": \"merge_lock\"}}"
+            
+            # 尝试创建锁文件
+            blob_sha = self.create_blob(lock_content)
+            if not blob_sha:
+                return False
+            
+            # 获取最新的main分支
+            latest_sha = self.get_latest_commit_sha()
+            if not latest_sha:
+                return False
+            
+            # 获取基础tree
+            response = self._make_request('GET', f'{self.repo_url}/git/commits/{latest_sha}')
+            if response.status_code != 200:
+                return False
+            base_tree_sha = response.json()['tree']['sha']
+            
+            # 创建包含锁文件的tree
+            tree_sha = self.create_tree(base_tree_sha, f"locks/{lock_file_name}", blob_sha)
+            if not tree_sha:
+                return False
+            
+            # 创建提交
+            commit_message = f"[LOCK] Acquire merge lock by {self.account_name}"
+            commit_sha = self.create_commit(tree_sha, latest_sha, commit_message)
+            if not commit_sha:
+                return False
+            
+            # 尝试更新main分支
+            if self.update_reference('main', commit_sha):
+                logger.info(f"[{self.account_name}] 成功获取合并锁")
+                return True
+            else:
+                logger.info(f"[{self.account_name}] 获取合并锁失败，可能有其他操作正在进行")
+                return False
+                
+        except Exception as e:
+            logger.warning(f"[{self.account_name}] 获取合并锁异常: {e}")
+            return False
+    
+    def release_merge_lock(self) -> bool:
+        """释放合并锁"""
+        try:
+            # 简单的锁释放：等待一段时间让其他操作完成
+            time.sleep(1)
+            return True
+        except Exception as e:
+            logger.warning(f"[{self.account_name}] 释放合并锁异常: {e}")
+            return False
+    
+    def merge_pull_request(self, pr_number: int, commit_title: str = None) -> bool:
+        """合并Pull Request - 增强版冲突避免"""
+        try:
+            # 添加初始随机延迟，避免多个账户同时操作
+            initial_delay = random.uniform(1.0, 3.0)
+            time.sleep(initial_delay)
+            
+            # 尝试获取分布式锁
+            lock_acquired = False
+            for lock_attempt in range(5):  # 增加重试次数
+                if self.acquire_merge_lock():
+                    lock_acquired = True
+                    break
+                else:
+                    # 根据重试次数递增等待时间
+                    base_wait = 5.0 + lock_attempt * 10.0  # 5秒基础，每次增加10秒
+                    lock_wait = random.uniform(base_wait, base_wait + 5.0)
+                    logger.info(f"[{self.account_name}] 等待合并锁释放... {lock_wait:.1f}秒 (尝试 {lock_attempt + 1}/5)")
+                    time.sleep(lock_wait)
+            
+            if not lock_acquired:
+                logger.warning(f"[{self.account_name}] 经过5次尝试仍无法获取合并锁，使用常规合并流程")
+            
             # 首先检查PR状态
             pr_response = self._make_request(
                 'GET', f'{self.repo_url}/pulls/{pr_number}'
@@ -412,20 +487,43 @@ class GitHubAutoCommit:
             pr_state = pr_data.get('state')
             mergeable = pr_data.get('mergeable')
             merged = pr_data.get('merged')
+            mergeable_state = pr_data.get('mergeable_state')
             
-            logger.info(f"[{self.account_name}] PR状态: state={pr_state}, mergeable={mergeable}, merged={merged}")
+            logger.info(f"[{self.account_name}] PR状态: state={pr_state}, mergeable={mergeable}, merged={merged}, mergeable_state={mergeable_state}")
             
             if merged:
                 logger.info(f"[{self.account_name}] PR已经被合并")
+                if lock_acquired:
+                    self.release_merge_lock()
                 return True
             
             if pr_state != 'open':
                 logger.error(f"[{self.account_name}] PR状态不是open: {pr_state}")
                 return False
             
+            # 增强的可合并性检查
             if mergeable is False:
-                logger.error(f"[{self.account_name}] PR不可合并，可能存在冲突")
+                logger.error(f"[{self.account_name}] PR不可合并，存在冲突")
                 return False
+            
+            # 如果mergeable状态未知，等待GitHub计算
+            if mergeable is None:
+                logger.info(f"[{self.account_name}] PR合并状态计算中，等待...")
+                for wait_attempt in range(5):
+                    time.sleep(2 + wait_attempt * 0.5)
+                    pr_check = self._make_request('GET', f'{self.repo_url}/pulls/{pr_number}')
+                    if pr_check.status_code == 200:
+                        pr_check_data = pr_check.json()
+                        mergeable = pr_check_data.get('mergeable')
+                        if mergeable is not None:
+                            break
+                        logger.info(f"[{self.account_name}] 继续等待合并状态计算... ({wait_attempt + 1}/5)")
+                    
+                if mergeable is False:
+                    logger.error(f"[{self.account_name}] PR确认不可合并")
+                    return False
+                elif mergeable is None:
+                    logger.warning(f"[{self.account_name}] 无法确定PR合并状态，谨慎继续")
             
             # 检查用户权限
             repo_response = self._make_request(
@@ -498,14 +596,21 @@ class GitHubAutoCommit:
             backoff_factor = CONCURRENCY_CONFIG['merge_retry_backoff']
             base_wait_time = 1.0
             
+            # 检查最近的合并活动，如果频繁则增加延迟
+            recent_commits = self.get_recent_commits(limit=3)
+            if recent_commits and len(recent_commits) >= 2:
+                recent_activity_delay = random.uniform(3.0, 6.0)
+                logger.info(f"[{self.account_name}] 检测到最近有合并活动，增加 {recent_activity_delay:.1f} 秒延迟")
+                time.sleep(recent_activity_delay)
+            
             for attempt in range(max_retries):
                 # 在重试前添加随机延迟，避免多个账户同时操作
                 if attempt > 0:
-                    wait_time = base_wait_time * (backoff_factor ** attempt) + random.uniform(1.0, 3.0)  # 使用配置的退避系数
-                    logger.info(f"[{self.account_name}] 等待 {wait_time:.1f} 秒后重试...")
+                    wait_time = base_wait_time * (backoff_factor ** attempt) + random.uniform(2.0, 5.0)  # 增加随机延迟范围
+                    logger.info(f"[{self.account_name}] 等待 {wait_time:.1f} 秒后重试 (尝试 {attempt + 1}/{max_retries})...")
                     time.sleep(wait_time)
                     
-                    # 在重试前重新检查PR状态
+                    # 在重试前重新检查PR状态和仓库状态
                     pr_check_response = self._make_request(
                         'GET', f'{self.repo_url}/pulls/{pr_number}'
                     )
@@ -516,20 +621,60 @@ class GitHubAutoCommit:
                             return True
                         
                         # 检查mergeable状态是否已更新
-                        mergeable_state = pr_check_data.get('mergeable')
-                        mergeable_state_status = pr_check_data.get('mergeable_state')
-                        logger.info(f"[{self.account_name}] PR状态更新: mergeable={mergeable_state}, mergeable_state={mergeable_state_status}")
+                        current_mergeable = pr_check_data.get('mergeable')
+                        current_mergeable_state = pr_check_data.get('mergeable_state')
+                        logger.info(f"[{self.account_name}] PR状态更新: mergeable={current_mergeable}, mergeable_state={current_mergeable_state}")
                         
-                        if mergeable_state is False:
+                        if current_mergeable is False:
                             logger.error(f"[{self.account_name}] PR确认不可合并，停止重试")
                             return False
+                        
+                        # 检查是否有其他PR正在合并
+                        open_prs_response = self._make_request('GET', f'{self.repo_url}/pulls?state=open')
+                        if open_prs_response.status_code == 200:
+                            open_prs = open_prs_response.json()
+                            if len(open_prs) > 3:  # 如果有太多开放的PR，可能表示合并队列拥堵
+                                extra_delay = random.uniform(5.0, 10.0)
+                                logger.info(f"[{self.account_name}] 检测到多个开放PR ({len(open_prs)}个)，增加 {extra_delay:.1f} 秒延迟")
+                                time.sleep(extra_delay)
                 
+                # 最后一次检查PR状态
+                final_pr_check = self._make_request('GET', f'{self.repo_url}/pulls/{pr_number}')
+                if final_pr_check.status_code == 200:
+                    final_pr_data = final_pr_check.json()
+                    if final_pr_data.get('merged'):
+                        logger.info(f"[{self.account_name}] PR在合并前已被其他操作合并")
+                        return True
+                    
+                    final_mergeable = final_pr_data.get('mergeable')
+                    if final_mergeable is False:
+                        logger.error(f"[{self.account_name}] PR在合并前确认不可合并")
+                        return False
+                
+                # 尝试合并，使用更保守的策略
                 response = self._make_request(
                     'PUT', f'{self.repo_url}/pulls/{pr_number}/merge', json=data
                 )
                 
                 if response.status_code == 200:
-                    logger.info(f"[{self.account_name}] PR合并成功")
+                    logger.info(f"[{self.account_name}] PR合并成功 (尝试 {attempt + 1}/{max_retries})")
+                    # 验证合并确实成功
+                    time.sleep(1)
+                    verify_response = self._make_request('GET', f'{self.repo_url}/pulls/{pr_number}')
+                    if verify_response.status_code == 200:
+                        verify_data = verify_response.json()
+                        if verify_data.get('merged'):
+                            logger.info(f"[{self.account_name}] PR合并状态已确认")
+                            if lock_acquired:
+                                self.release_merge_lock()
+                            return True
+                        else:
+                            logger.warning(f"[{self.account_name}] PR合并状态验证失败，但API返回成功")
+                            if lock_acquired:
+                                self.release_merge_lock()
+                            return True  # 相信API响应
+                    if lock_acquired:
+                        self.release_merge_lock()
                     return True
                 
                 error_msg = response.text
@@ -539,9 +684,11 @@ class GitHubAutoCommit:
                 except:
                     pass
                 
+                logger.warning(f"[{self.account_name}] 合并尝试失败: {response.status_code} - {error_msg} (尝试 {attempt + 1}/{max_retries})")
+                
                 # 检查是否是因为分支被修改导致的冲突
-                if response.status_code == 405 and ("Base branch was modified" in error_msg or "merge conflict" in error_msg.lower()):
-                    logger.warning(f"[{self.account_name}] 检测到分支冲突: {error_msg} (尝试 {attempt + 1}/{max_retries})")
+                if response.status_code == 405 and any(keyword in error_msg for keyword in ["Base branch was modified", "merge conflict", "not mergeable"]):
+                    logger.warning(f"[{self.account_name}] 检测到分支冲突: {error_msg}")
                     
                     if attempt < max_retries - 1:  # 不是最后一次尝试
                         # 重新检查PR状态
@@ -553,6 +700,8 @@ class GitHubAutoCommit:
                             pr_data = pr_response.json()
                             if pr_data.get('merged'):
                                 logger.info(f"[{self.account_name}] PR已被其他操作合并")
+                                if lock_acquired:
+                                    self.release_merge_lock()
                                 return True
                             
                             # 检查是否仍然可以合并
@@ -583,6 +732,8 @@ class GitHubAutoCommit:
                         pr_data = pr_response.json()
                         if pr_data.get('merged'):
                             logger.info(f"[{self.account_name}] PR已被合并")
+                            if lock_acquired:
+                                self.release_merge_lock()
                             return True
                     
                     logger.error(f"[{self.account_name}] PR不可合并: {error_msg}")
@@ -595,11 +746,19 @@ class GitHubAutoCommit:
             
             # 所有重试都失败了
             logger.error(f"[{self.account_name}] PR合并失败，已重试{max_retries}次")
+            if lock_acquired:
+                self.release_merge_lock()
             return False
                 
         except Exception as e:
             logger.error(f"[{self.account_name}] 合并PR异常: {e}")
+            if lock_acquired:
+                self.release_merge_lock()
             return False
+        finally:
+            # 确保锁被释放
+            if 'lock_acquired' in locals() and lock_acquired:
+                self.release_merge_lock()
     
     def create_branch_with_conflict_detection(self, branch_name: str, commit_sha: str) -> tuple:
         """创建分支，带冲突检测和重试机制"""

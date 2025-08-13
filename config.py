@@ -45,16 +45,19 @@ COMMIT_FREQUENCY_OPTIONS = {
 
 # 并发控制配置
 CONCURRENCY_CONFIG = {
-    "max_workers": 3,  # 最大并发数，建议不超过3以减少GitHub API冲突
-    "base_delay_range": (1.5, 3.0),  # 基础延迟范围（秒）
-    "retry_delay_range": (3.0, 8.0),  # 重试延迟范围（秒）
-    "max_retries_per_account": 3,  # 每个账号的最大重试次数
+    "max_workers": 1,  # 最大并发数，设为1确保串行执行
+    "base_delay_range": (5.0, 10.0),  # 基础延迟范围（秒），进一步增加延迟
+    "retry_delay_range": (10.0, 20.0),  # 重试延迟范围（秒），大幅增加重试延迟
+    "max_retries_per_account": 3,  # 每个账号的最大重试次数，减少重试避免长时间阻塞
     "merge_retry_count": 8,  # PR合并的最大重试次数
-    "merge_retry_backoff": 1.5,  # PR合并重试的退避系数
+    "merge_retry_backoff": 2.0,  # PR合并重试的退避系数
     "enable_smart_retry": True,  # 启用智能重试（检测冲突类型）
+    "serial_execution_delay": 30,  # 串行执行时账号间的基础延迟（秒）
+    "serial_execution_increment": 15,  # 串行执行时每个账号的额外延迟（秒）
     "conflict_detection_keywords": [  # 冲突检测关键词
         "合并失败", "conflict", "not mergeable", "Base branch was modified",
-        "merge conflict", "Pull Request is not mergeable"
+        "merge conflict", "Pull Request is not mergeable", "cannot be merged",
+        "merge conflicts", "conflicting files", "unable to merge"
     ]
 }
 

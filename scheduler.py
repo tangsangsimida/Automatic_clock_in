@@ -155,8 +155,39 @@ class AutoCommitScheduler:
                            f"基础延迟={CONCURRENCY_CONFIG['base_delay_range']}, "
                            f"重试次数={CONCURRENCY_CONFIG['max_retries_per_account']}")
             
-            # 执行多账号提交
-            results = run_multi_account_commits(accounts_to_run)
+            # 如果只有一个账号，直接执行避免并发冲突
+            if len(accounts_to_run) == 1:
+                account = accounts_to_run[0]
+                logger.info(f"🔄 执行单个账号 [{account['name']}] 的提交任务")
+                
+                auto_commit = GitHubAutoCommit(account)
+                success, result = auto_commit.auto_commit_and_pr()
+                
+                results = {account['name']: (success, result)}
+            else:
+                # 多账号情况下，使用串行执行避免冲突
+                logger.info(f"🔄 串行执行 {len(accounts_to_run)} 个账号的提交任务以避免冲突")
+                results = {}
+                
+                for i, account in enumerate(accounts_to_run):
+                    if i > 0:
+                         # 使用配置文件中的延迟参数
+                         import time
+                         delay = CONCURRENCY_CONFIG['serial_execution_delay'] + i * CONCURRENCY_CONFIG['serial_execution_increment']
+                         logger.info(f"⏳ 等待 {delay} 秒后执行下一个账号 [{account['name']}] (避免冲突)")
+                         time.sleep(delay)
+                    
+                    logger.info(f"🔄 执行账号 [{account['name']}] 的提交任务 ({i+1}/{len(accounts_to_run)})")
+                    
+                    auto_commit = GitHubAutoCommit(account)
+                    success, result = auto_commit.auto_commit_and_pr()
+                    
+                    results[account['name']] = (success, result)
+                    
+                    if success:
+                        logger.info(f"✅ [{account['name']}] 提交成功: {result}")
+                    else:
+                        logger.error(f"❌ [{account['name']}] 提交失败: {result}")
             
             # 统计结果
             success_count = sum(1 for success, _ in results.values() if success)
@@ -164,12 +195,14 @@ class AutoCommitScheduler:
             
             logger.info(f"定时提交任务完成: {success_count}/{total_count} 成功")
             
-            # 记录详细结果
-            for account_name, (success, result) in results.items():
-                if success:
-                    logger.info(f"✅ [{account_name}] 提交成功: {result}")
-                else:
-                    logger.error(f"❌ [{account_name}] 提交失败: {result}")
+            # 对于单账号执行，记录详细结果
+            if len(accounts_to_run) == 1:
+                for account_name, (success, result) in results.items():
+                    if success:
+                        logger.info(f"✅ [{account_name}] 提交成功: {result}")
+                    else:
+                        logger.error(f"❌ [{account_name}] 提交失败: {result}")
+            # 多账号串行执行的结果已在执行过程中记录
                     
         except Exception as e:
             logger.error(f"定时任务异常: {e}")
