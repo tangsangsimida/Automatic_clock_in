@@ -952,8 +952,8 @@ def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple
     """多账号串行提交 - 确保每个账号依次提交并合并，避免冲突"""
     results = {}
     
-    # 按账户名排序，确保每次执行顺序一致
-    sorted_accounts = sorted(accounts, key=lambda x: x['name'])
+    # 按照配置文件中的先后顺序执行
+    sorted_accounts = accounts  # 保持原始顺序
     logger.info(f"账户执行顺序: {[acc['name'] for acc in sorted_accounts]}")
     
     def commit_for_account(account_config):
