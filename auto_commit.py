@@ -397,49 +397,9 @@ class GitHubAutoCommit:
             return None
     
     def acquire_merge_lock(self) -> bool:
-        """获取合并锁，防止多个账户同时合并"""
-        try:
-            lock_file_name = f".merge_lock_{int(time.time())}"
-            lock_content = f"{{\"account\": \"{self.account_name}\", \"timestamp\": {time.time()}, \"action\": \"merge_lock\"}}"
-            
-            # 尝试创建锁文件
-            blob_sha = self.create_blob(lock_content)
-            if not blob_sha:
-                return False
-            
-            # 获取最新的main分支
-            latest_sha = self.get_latest_commit_sha()
-            if not latest_sha:
-                return False
-            
-            # 获取基础tree
-            response = self._make_request('GET', f'{self.repo_url}/git/commits/{latest_sha}')
-            if response.status_code != 200:
-                return False
-            base_tree_sha = response.json()['tree']['sha']
-            
-            # 创建包含锁文件的tree
-            tree_sha = self.create_tree(base_tree_sha, f"locks/{lock_file_name}", blob_sha)
-            if not tree_sha:
-                return False
-            
-            # 创建提交
-            commit_message = f"[LOCK] Acquire merge lock by {self.account_name}"
-            commit_sha = self.create_commit(tree_sha, latest_sha, commit_message)
-            if not commit_sha:
-                return False
-            
-            # 尝试更新main分支
-            if self.update_reference('main', commit_sha):
-                logger.info(f"[{self.account_name}] 成功获取合并锁")
-                return True
-            else:
-                logger.info(f"[{self.account_name}] 获取合并锁失败，可能有其他操作正在进行")
-                return False
-                
-        except Exception as e:
-            logger.warning(f"[{self.account_name}] 获取合并锁异常: {e}")
-            return False
+        """简化的锁机制，直接返回成功（串行执行由外部控制）"""
+        logger.info(f"[{self.account_name}] 准备进行合并操作")
+        return True
     
     def release_merge_lock(self) -> bool:
         """释放合并锁"""
@@ -452,27 +412,9 @@ class GitHubAutoCommit:
             return False
     
     def merge_pull_request(self, pr_number: int, commit_title: str = None) -> bool:
-        """合并Pull Request - 增强版冲突避免"""
+        """合并Pull Request - 简化版直接合并"""
         try:
-            # 添加初始随机延迟，避免多个账户同时操作
-            initial_delay = random.uniform(1.0, 3.0)
-            time.sleep(initial_delay)
-            
-            # 尝试获取分布式锁
-            lock_acquired = False
-            for lock_attempt in range(5):  # 增加重试次数
-                if self.acquire_merge_lock():
-                    lock_acquired = True
-                    break
-                else:
-                    # 根据重试次数递增等待时间
-                    base_wait = 5.0 + lock_attempt * 10.0  # 5秒基础，每次增加10秒
-                    lock_wait = random.uniform(base_wait, base_wait + 5.0)
-                    logger.info(f"[{self.account_name}] 等待合并锁释放... {lock_wait:.1f}秒 (尝试 {lock_attempt + 1}/5)")
-                    time.sleep(lock_wait)
-            
-            if not lock_acquired:
-                logger.warning(f"[{self.account_name}] 经过5次尝试仍无法获取合并锁，使用常规合并流程")
+            logger.info(f"[{self.account_name}] 开始合并PR #{pr_number}")
             
             # 首先检查PR状态
             pr_response = self._make_request(
@@ -493,8 +435,6 @@ class GitHubAutoCommit:
             
             if merged:
                 logger.info(f"[{self.account_name}] PR已经被合并")
-                if lock_acquired:
-                    self.release_merge_lock()
                 return True
             
             if pr_state != 'open':
@@ -665,16 +605,10 @@ class GitHubAutoCommit:
                         verify_data = verify_response.json()
                         if verify_data.get('merged'):
                             logger.info(f"[{self.account_name}] PR合并状态已确认")
-                            if lock_acquired:
-                                self.release_merge_lock()
                             return True
                         else:
                             logger.warning(f"[{self.account_name}] PR合并状态验证失败，但API返回成功")
-                            if lock_acquired:
-                                self.release_merge_lock()
                             return True  # 相信API响应
-                    if lock_acquired:
-                        self.release_merge_lock()
                     return True
                 
                 error_msg = response.text
@@ -700,8 +634,6 @@ class GitHubAutoCommit:
                             pr_data = pr_response.json()
                             if pr_data.get('merged'):
                                 logger.info(f"[{self.account_name}] PR已被其他操作合并")
-                                if lock_acquired:
-                                    self.release_merge_lock()
                                 return True
                             
                             # 检查是否仍然可以合并
@@ -732,8 +664,6 @@ class GitHubAutoCommit:
                         pr_data = pr_response.json()
                         if pr_data.get('merged'):
                             logger.info(f"[{self.account_name}] PR已被合并")
-                            if lock_acquired:
-                                self.release_merge_lock()
                             return True
                     
                     logger.error(f"[{self.account_name}] PR不可合并: {error_msg}")
@@ -746,19 +676,11 @@ class GitHubAutoCommit:
             
             # 所有重试都失败了
             logger.error(f"[{self.account_name}] PR合并失败，已重试{max_retries}次")
-            if lock_acquired:
-                self.release_merge_lock()
             return False
                 
         except Exception as e:
             logger.error(f"[{self.account_name}] 合并PR异常: {e}")
-            if lock_acquired:
-                self.release_merge_lock()
             return False
-        finally:
-            # 确保锁被释放
-            if 'lock_acquired' in locals() and lock_acquired:
-                self.release_merge_lock()
     
     def create_branch_with_conflict_detection(self, branch_name: str, commit_sha: str) -> tuple:
         """创建分支，带冲突检测和重试机制"""
@@ -1030,6 +952,10 @@ def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple
     """多账号串行提交 - 确保每个账号依次提交并合并，避免冲突"""
     results = {}
     
+    # 按账户名排序，确保每次执行顺序一致
+    sorted_accounts = sorted(accounts, key=lambda x: x['name'])
+    logger.info(f"账户执行顺序: {[acc['name'] for acc in sorted_accounts]}")
+    
     def commit_for_account(account_config):
         """为单个账户执行提交，带重试机制"""
         account_name = account_config['name']
@@ -1077,15 +1003,12 @@ def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple
         
         return False, "未知错误"
     
-    # 串行执行每个账号的提交
-    serial_delay = CONCURRENCY_CONFIG['serial_execution_delay']
-    serial_increment = CONCURRENCY_CONFIG['serial_execution_increment']
+    # 串行执行每个账号的提交，无需等待间隔
+    logger.info(f"开始串行处理 {len(sorted_accounts)} 个账号，确保依次提交并合并")
     
-    logger.info(f"开始串行处理 {len(accounts)} 个账号，确保依次提交并合并")
-    
-    for i, account in enumerate(accounts):
+    for i, account in enumerate(sorted_accounts):
         account_name = account['name']
-        logger.info(f"[{i+1}/{len(accounts)}] 开始处理账号: {account_name}")
+        logger.info(f"[{i+1}/{len(sorted_accounts)}] 开始处理账号: {account_name}")
         
         # 执行提交和合并
         success, result = commit_for_account(account)
@@ -1096,13 +1019,9 @@ def run_multi_account_commits(accounts: List[Dict[str, str]]) -> Dict[str, Tuple
         else:
             logger.error(f"[{account_name}] 提交失败: {result}")
         
-        # 如果不是最后一个账号，添加延迟
-        if i < len(accounts) - 1:
-            delay_time = serial_delay + (i * serial_increment)
-            logger.info(f"等待 {delay_time} 秒后处理下一个账号...")
-            time.sleep(delay_time)
+        # 账户间无需等待，直接处理下一个账户
     
-    logger.info(f"所有账号处理完成，成功: {sum(1 for success, _ in results.values() if success)}/{len(accounts)}")
+    logger.info(f"所有账号处理完成，成功: {sum(1 for success, _ in results.values() if success)}/{len(sorted_accounts)}")
     return results
 
 def main():
